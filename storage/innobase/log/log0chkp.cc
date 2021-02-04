@@ -66,7 +66,7 @@ the file COPYING.Google.
 #include "trx0roll.h"
 #include "trx0sys.h"
 #include "trx0trx.h"
-#include "sql/conn_bind_manager.h"
+#include "sql/sched_affinity_manager.h"
 
 #ifndef UNIV_HOTBACKUP
 
@@ -955,7 +955,7 @@ static bool log_consider_checkpoint(log_t &log) {
 
 void log_checkpointer(log_t *log_ptr) {
 #ifdef HAVE_LIBNUMA
-  connBindManager.StaticBind(connBindManager.getCpuInfo().bms[BM_LCP]);
+  sched_affinity::Sched_affinity_manager::get_instance()->static_bind(sched_affinity::TT_LOG_CHECKPOINTER);
 #endif
 
   ut_a(log_ptr != nullptr);

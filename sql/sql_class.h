@@ -767,11 +767,11 @@ class THD : public MDL_context_owner,
             public Open_tables_state {
 #ifdef HAVE_LIBNUMA 
  private:
-  int thread_bind_node;
+  int m_sched_affinty_group_index;
 
  public:
-  void set_thread_bind_node(int pos);
-  int get_thread_bind_node();
+  void set_sched_affinity_group_index(int index);
+  int get_sched_affinity_group_index();
 #endif
 
  private:

@@ -317,7 +317,6 @@ SET(SQL_GIS_SOURCES
 )
 
 SET(SQL_SHARED_SOURCES
-  ConnBindManager.cc
   abstract_query_plan.cc
   auth/auth_acls.cc
   auth/auth_common.cc
@@ -452,6 +451,7 @@ SET(SQL_SHARED_SOURCES
   rpl_write_set_handler.cc
   rules_table_service.cc
   rwlock_scoped_lock.cc
+  sched_affinity_manager.cc
   sd_notify.cc
   sdi_utils.cc
   session_tracker.cc

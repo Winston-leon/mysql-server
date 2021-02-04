@@ -69,7 +69,7 @@ the file COPYING.Google.
 #include "trx0roll.h"
 #include "trx0sys.h"
 #include "trx0trx.h"
-#include "sql/conn_bind_manager.h"
+#include "sql/sched_affinity_manager.h"
 
 /**************************************************/ /**
  @page PAGE_INNODB_REDO_LOG_THREADS Background redo log threads
@@ -1966,7 +1966,7 @@ static void log_writer_write_buffer(log_t &log, lsn_t next_write_lsn) {
 
 void log_writer(log_t *log_ptr) {
 #ifdef HAVE_LIBNUMA
-  connBindManager.StaticBind(connBindManager.getCpuInfo().bms[BM_LW]);
+  sched_affinity::Sched_affinity_manager::get_instance()->static_bind(sched_affinity::TT_LOG_WRITER);
 #endif
 
   ut_a(log_ptr != nullptr);
@@ -2208,7 +2208,7 @@ static void log_flush_low(log_t &log) {
 
 void log_flusher(log_t *log_ptr) {
 #ifdef HAVE_LIBNUMA
-  connBindManager.StaticBind(connBindManager.getCpuInfo().bms[BM_LF]);
+  sched_affinity::Sched_affinity_manager::get_instance()->static_bind(sched_affinity::TT_LOG_FLUSHER);
 #endif
 
   ut_a(log_ptr != nullptr);
@@ -2340,7 +2340,7 @@ void log_flusher(log_t *log_ptr) {
 
 void log_write_notifier(log_t *log_ptr) {
 #ifdef HAVE_LIBNUMA
-  connBindManager.StaticBind(connBindManager.getCpuInfo().bms[BM_LWN]);
+  sched_affinity::Sched_affinity_manager::get_instance()->static_bind(sched_affinity::TT_LOG_WRITE_NOTIFIER);
 #endif
 
   ut_a(log_ptr != nullptr);
@@ -2443,7 +2443,7 @@ void log_write_notifier(log_t *log_ptr) {
 
 void log_flush_notifier(log_t *log_ptr) {
 #ifdef HAVE_LIBNUMA
-  connBindManager.StaticBind(connBindManager.getCpuInfo().bms[BM_LFN]);
+  sched_affinity::Sched_affinity_manager::get_instance()->static_bind(sched_affinity::TT_LOG_FLUSH_NOTIFIER);
 #endif
 
   ut_a(log_ptr != nullptr);
@@ -2546,7 +2546,7 @@ void log_flush_notifier(log_t *log_ptr) {
 
 void log_closer(log_t *log_ptr) {
 #ifdef HAVE_LIBNUMA
-  connBindManager.StaticBind(connBindManager.getCpuInfo().bms[BM_LC]);
+  sched_affinity::Sched_affinity_manager::get_instance()->static_bind(sched_affinity::TT_LOG_CLOSER);
 #endif
 
   ut_a(log_ptr != nullptr);

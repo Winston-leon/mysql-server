@@ -456,7 +456,7 @@ THD::THD(bool enable_plugins)
                  global_system_variables.query_alloc_block_size,
                  global_system_variables.query_prealloc_size);
 #ifdef HAVE_LIBNUMA
-  thread_bind_node = 0;
+  m_sched_affinty_group_index = -1;
 #endif
   stmt_arena = this;
   thread_stack = nullptr;
@@ -575,12 +575,12 @@ THD::THD(bool enable_plugins)
 }
 
 #ifdef HAVE_LIBNUMA
-void THD::set_thread_bind_node(int pos) {
-  thread_bind_node = pos;
+void THD::set_sched_affinity_group_index(int index) {
+  m_sched_affinty_group_index = index;
 }
 
-int THD::get_thread_bind_node() {
-  return thread_bind_node;
+int THD::get_sched_affinity_group_index() {
+  return m_sched_affinty_group_index;
 }
 #endif
 

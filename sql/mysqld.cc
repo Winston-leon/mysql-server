@@ -615,7 +615,7 @@ The documentation is based on the source files such as:
 #include "sql/bootstrap.h"  // bootstrap
 #include "sql/check_stack.h"
 #ifdef HAVE_LIBNUMA
-#include "sql/conn_bind_manager.h"
+#include "sql/sched_affinity_manager.h"
 #endif
 #include "sql/conn_handler/connection_acceptor.h"  // Connection_acceptor
 #include "sql/conn_handler/connection_handler_impl.h"  // Per_thread_connection_handler
@@ -1021,6 +1021,7 @@ ulong opt_keyring_migration_port = 0;
 bool migrate_connect_options = false;
 uint host_cache_size;
 ulong log_error_verbosity = 3;  // have a non-zero value during early start-up
+extern char* sched_affinity_args[sched_affinity::TT_MAX];
 
 #if defined(_WIN32)
 /*
@@ -1888,60 +1889,6 @@ static void server_components_init_wait() {
   mysql_mutex_unlock(&LOCK_server_started);
 }
 
-#ifdef HAVE_LIBNUMA
-char* bind_attrs[BM_MAX];
-#endif
-
-#ifdef HAVE_LIBNUMA
-static Sys_var_charptr Sys_user_thread_bind_cpu(
-    "user_thread_bind_cpu",
-    "The set of cpus which user thread will run on.",
-    GLOBAL_VAR(bind_attrs[BM_USER]), CMD_LINE(OPT_ARG),
-    IN_FS_CHARSET, DEFAULT(nullptr));
-
-static Sys_var_charptr Sys_log_writer_bind_cpu(
-    "log_writer_bind_cpu",
-    "The set of cpus which log writer thread will run on.",
-    GLOBAL_VAR(bind_attrs[BM_LW]), CMD_LINE(OPT_ARG),
-    IN_FS_CHARSET, DEFAULT(nullptr));
-
-static Sys_var_charptr Sys_log_flusher_bind_cpu(
-    "log_flusher_bind_cpu",
-    "The set of cpus which log flusher thread will run on.",
-    GLOBAL_VAR(bind_attrs[BM_LF]), CMD_LINE(OPT_ARG),
-    IN_FS_CHARSET, DEFAULT(nullptr));
-
-static Sys_var_charptr Sys_log_writer_notifier_bind_cpu(
-    "log_writer_notifier_bind_cpu",
-    "The set of cpus which log writer notifier thread will run on.",
-    GLOBAL_VAR(bind_attrs[BM_LWN]), CMD_LINE(OPT_ARG),
-    IN_FS_CHARSET,  DEFAULT(nullptr));
-
-static Sys_var_charptr Sys_log_flusher_notifier_bind_cpu(
-    "log_flusher_notifier_bind_cpu",
-    "The set of cpus which log flusher notifier thread will run on.",
-    GLOBAL_VAR(bind_attrs[BM_LFN]), CMD_LINE(OPT_ARG),
-    IN_FS_CHARSET, DEFAULT(nullptr));
-
-static Sys_var_charptr Sys_log_closer_bind_cpu(
-    "log_closer_bind_cpu",
-    "The set of cpus which log closer thread will run on.",
-    GLOBAL_VAR(bind_attrs[BM_LC]), CMD_LINE(OPT_ARG),
-    IN_FS_CHARSET, DEFAULT(nullptr));
-
-static Sys_var_charptr Sys_log_checkpointer_bind_cpu(
-    "log_checkpointer_bind_cpu",
-    "The set of cpus which log checkpointer thread will run on.",
-    GLOBAL_VAR(bind_attrs[BM_LCP]), CMD_LINE(OPT_ARG),
-    IN_FS_CHARSET, DEFAULT(nullptr));
-
-static Sys_var_charptr Sys_log_purger_bind_cpu(
-    "log_purger_bind_cpu",
-    "The set of cpus which log purger thread will run on.",
-    GLOBAL_VAR(bind_attrs[BM_LP]), CMD_LINE(OPT_ARG),
-    IN_FS_CHARSET,  DEFAULT(nullptr));
-#endif
-
 /****************************************************************************
 ** Code to end mysqld
 ****************************************************************************/
@@ -2441,6 +2388,7 @@ static void clean_up(bool print_message) {
   */
   sys_var_end();
   free_status_vars();
+  sched_affinity::Sched_affinity_manager::free_instance();
 
   if (have_statement_timeout == SHOW_OPTION_YES) my_timer_deinitialize();
 
@@ -6739,12 +6687,14 @@ int mysqld_main(int argc, char **argv)
   /* Determine default TCP port and unix socket name */
   set_ports();
 
-  if (init_server_components()) unireg_abort(MYSQLD_ABORT_EXIT);
-
 #ifdef HAVE_LIBNUMA
-  connBindManager.Init(bind_attrs);
+  if (sched_affinity::Sched_affinity_manager::create_instance(sched_affinity_args) == nullptr) {
+    LogErr(ERROR_LEVEL, ER_CANNOT_CREATE_SCHED_AFFINITY_MANAGER);
+    unireg_abort(MYSQLD_ABORT_EXIT);
+  }
 #endif
 
+  if (init_server_components()) unireg_abort(MYSQLD_ABORT_EXIT);
 
   if (!server_id_supplied)
     LogErr(INFORMATION_LEVEL, ER_WARN_NO_SERVERID_SPECIFIED);
@@ -8259,6 +8209,32 @@ static int show_queries(THD *thd, SHOW_VAR *var, char *) {
   return 0;
 }
 
+static int show_sched_affinity_status(THD *, SHOW_VAR *var, char *buff) {
+  var->type = SHOW_CHAR;
+  var->value = buff;
+  sched_affinity::Sched_affinity_manager::get_instance()->take_snapshot(
+      buff, SHOW_VAR_FUNC_BUFF_SIZE + 1);
+  return 0;
+}
+
+static int show_sched_affinity_group_number(THD *, SHOW_VAR *var, char *) {
+  var->type = SHOW_INT;
+  var->value = reinterpret_cast<char *>(
+      const_cast<int *>(&sched_affinity::Sched_affinity_manager::get_instance()
+                             ->get_sched_affinity_info()
+                             .total_node_num));
+  return 0;
+}
+
+static int show_sched_affinity_group_capacity(THD *, SHOW_VAR *var, char *) {
+  var->type = SHOW_INT;
+  var->value = reinterpret_cast<char *>(
+      const_cast<int *>(&sched_affinity::Sched_affinity_manager::get_instance()
+                             ->get_sched_affinity_info()
+                             .cpu_num_per_node));
+  return 0;
+}
+
 static int show_net_compression(THD *thd, SHOW_VAR *var, char *buff) {
   var->type = SHOW_MY_BOOL;
   var->value = buff;
@@ -8842,6 +8818,9 @@ SHOW_VAR status_vars[] = {
     {"Queries", (char *)&show_queries, SHOW_FUNC, SHOW_SCOPE_ALL},
     {"Questions", (char *)offsetof(System_status_var, questions),
      SHOW_LONGLONG_STATUS, SHOW_SCOPE_ALL},
+    {"Sched_affinity_status", (char *)&show_sched_affinity_status, SHOW_FUNC, SHOW_SCOPE_ALL},
+    {"Sched_affinity_group_number", (char *)&show_sched_affinity_group_number, SHOW_FUNC, SHOW_SCOPE_ALL},
+    {"Sched_affinity_group_capacity", (char *)&show_sched_affinity_group_capacity, SHOW_FUNC, SHOW_SCOPE_ALL},
     {"Secondary_engine_execution_count",
      (char *)offsetof(System_status_var, secondary_engine_execution_count),
      SHOW_LONGLONG_STATUS, SHOW_SCOPE_ALL},

@@ -89,7 +89,7 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #include "ut0crc32.h"
 #endif /* !UNIV_HOTBACKUP */
 #include "ut0mem.h"
-#include "sql/conn_bind_manager.h"
+#include "sql/sched_affinity_manager.h"
 
 #ifdef UNIV_HOTBACKUP
 #include "page0size.h"
@@ -3014,7 +3014,7 @@ static void srv_purge_coordinator_suspend(
 /** Purge coordinator thread that schedules the purge tasks. */
 void srv_purge_coordinator_thread() {
 #ifdef HAVE_LIBNUMA
-  connBindManager.StaticBind(connBindManager.getCpuInfo().bms[BM_LP]);
+  sched_affinity::Sched_affinity_manager::get_instance()->static_bind(sched_affinity::TT_PURGE_COORDINATOR);
 #endif
 
   srv_slot_t *slot;
