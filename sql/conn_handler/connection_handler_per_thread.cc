@@ -27,6 +27,7 @@
 #include <list>
 #include <new>
 
+#include "sql/conn_bind_manager.h"
 #include "my_compiler.h"
 #include "my_dbug.h"
 #include "my_inttypes.h"
@@ -295,6 +296,10 @@ static void *handle_connection(void *arg) {
 
     thd_manager->add_thd(thd);
 
+#ifdef HAVE_LIBNUMA
+    connBindManager.DynamicBind(thd);
+#endif
+
     if (thd_prepare_connection(thd))
       handler_manager->inc_aborted_connects();
     else {
@@ -304,6 +309,10 @@ static void *handle_connection(void *arg) {
       end_connection(thd);
     }
     close_connection(thd, 0, false, false);
+
+#ifdef HAVE_LIBNUMA
+    connBindManager.DynamicUnbind(thd);
+#endif
 
     thd->get_stmt_da()->reset_diagnostics_area();
     thd->release_resources();

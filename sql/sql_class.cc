@@ -455,6 +455,9 @@ THD::THD(bool enable_plugins)
   init_sql_alloc(key_memory_thd_main_mem_root, &main_mem_root,
                  global_system_variables.query_alloc_block_size,
                  global_system_variables.query_prealloc_size);
+#ifdef HAVE_LIBNUMA
+  thread_bind_node = 0;
+#endif
   stmt_arena = this;
   thread_stack = nullptr;
   m_catalog.str = "std";
@@ -570,6 +573,16 @@ THD::THD(bool enable_plugins)
 #endif
   set_system_user(false);
 }
+
+#ifdef HAVE_LIBNUMA
+void THD::set_thread_bind_node(int pos) {
+  thread_bind_node = pos;
+}
+
+int THD::get_thread_bind_node() {
+  return thread_bind_node;
+}
+#endif
 
 void THD::set_transaction(Transaction_ctx *transaction_ctx) {
   DBUG_ASSERT(is_attachable_ro_transaction_active());

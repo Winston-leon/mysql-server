@@ -69,6 +69,7 @@ the file COPYING.Google.
 #include "trx0roll.h"
 #include "trx0sys.h"
 #include "trx0trx.h"
+#include "sql/conn_bind_manager.h"
 
 /**************************************************/ /**
  @page PAGE_INNODB_REDO_LOG_THREADS Background redo log threads
@@ -1964,6 +1965,10 @@ static void log_writer_write_buffer(log_t &log, lsn_t next_write_lsn) {
 }
 
 void log_writer(log_t *log_ptr) {
+#ifdef HAVE_LIBNUMA
+  connBindManager.StaticBind(connBindManager.getCpuInfo().bms[BM_LW]);
+#endif
+
   ut_a(log_ptr != nullptr);
 
   log_t &log = *log_ptr;
@@ -2202,6 +2207,10 @@ static void log_flush_low(log_t &log) {
 }
 
 void log_flusher(log_t *log_ptr) {
+#ifdef HAVE_LIBNUMA
+  connBindManager.StaticBind(connBindManager.getCpuInfo().bms[BM_LF]);
+#endif
+
   ut_a(log_ptr != nullptr);
 
   log_t &log = *log_ptr;
@@ -2330,6 +2339,10 @@ void log_flusher(log_t *log_ptr) {
 /* @{ */
 
 void log_write_notifier(log_t *log_ptr) {
+#ifdef HAVE_LIBNUMA
+  connBindManager.StaticBind(connBindManager.getCpuInfo().bms[BM_LWN]);
+#endif
+
   ut_a(log_ptr != nullptr);
 
   log_t &log = *log_ptr;
@@ -2429,6 +2442,10 @@ void log_write_notifier(log_t *log_ptr) {
 /* @{ */
 
 void log_flush_notifier(log_t *log_ptr) {
+#ifdef HAVE_LIBNUMA
+  connBindManager.StaticBind(connBindManager.getCpuInfo().bms[BM_LFN]);
+#endif
+
   ut_a(log_ptr != nullptr);
 
   log_t &log = *log_ptr;
@@ -2528,6 +2545,10 @@ void log_flush_notifier(log_t *log_ptr) {
 /* @{ */
 
 void log_closer(log_t *log_ptr) {
+#ifdef HAVE_LIBNUMA
+  connBindManager.StaticBind(connBindManager.getCpuInfo().bms[BM_LC]);
+#endif
+
   ut_a(log_ptr != nullptr);
 
   log_t &log = *log_ptr;

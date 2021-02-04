@@ -317,6 +317,7 @@ SET(SQL_GIS_SOURCES
 )
 
 SET(SQL_SHARED_SOURCES
+  ConnBindManager.cc
   abstract_query_plan.cc
   auth/auth_acls.cc
   auth/auth_common.cc

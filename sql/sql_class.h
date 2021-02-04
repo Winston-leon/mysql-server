@@ -765,6 +765,15 @@ extern "C" void my_message_sql(uint error, const char *str, myf MyFlags);
 class THD : public MDL_context_owner,
             public Query_arena,
             public Open_tables_state {
+#ifdef HAVE_LIBNUMA 
+ private:
+  int thread_bind_node;
+
+ public:
+  void set_thread_bind_node(int pos);
+  int get_thread_bind_node();
+#endif
+
  private:
   inline bool is_stmt_prepare() const {
     DBUG_ASSERT(0);

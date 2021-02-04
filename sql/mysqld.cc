@@ -614,6 +614,9 @@ The documentation is based on the source files such as:
 #include "sql/binlog.h"     // mysql_bin_log
 #include "sql/bootstrap.h"  // bootstrap
 #include "sql/check_stack.h"
+#ifdef HAVE_LIBNUMA
+#include "sql/conn_bind_manager.h"
+#endif
 #include "sql/conn_handler/connection_acceptor.h"  // Connection_acceptor
 #include "sql/conn_handler/connection_handler_impl.h"  // Per_thread_connection_handler
 #include "sql/conn_handler/connection_handler_manager.h"  // Connection_handler_manager
@@ -1884,6 +1887,60 @@ static void server_components_init_wait() {
     mysql_cond_wait(&COND_server_started, &LOCK_server_started);
   mysql_mutex_unlock(&LOCK_server_started);
 }
+
+#ifdef HAVE_LIBNUMA
+char* bind_attrs[BM_MAX];
+#endif
+
+#ifdef HAVE_LIBNUMA
+static Sys_var_charptr Sys_user_thread_bind_cpu(
+    "user_thread_bind_cpu",
+    "The set of cpus which user thread will run on.",
+    GLOBAL_VAR(bind_attrs[BM_USER]), CMD_LINE(OPT_ARG),
+    IN_FS_CHARSET, DEFAULT(nullptr));
+
+static Sys_var_charptr Sys_log_writer_bind_cpu(
+    "log_writer_bind_cpu",
+    "The set of cpus which log writer thread will run on.",
+    GLOBAL_VAR(bind_attrs[BM_LW]), CMD_LINE(OPT_ARG),
+    IN_FS_CHARSET, DEFAULT(nullptr));
+
+static Sys_var_charptr Sys_log_flusher_bind_cpu(
+    "log_flusher_bind_cpu",
+    "The set of cpus which log flusher thread will run on.",
+    GLOBAL_VAR(bind_attrs[BM_LF]), CMD_LINE(OPT_ARG),
+    IN_FS_CHARSET, DEFAULT(nullptr));
+
+static Sys_var_charptr Sys_log_writer_notifier_bind_cpu(
+    "log_writer_notifier_bind_cpu",
+    "The set of cpus which log writer notifier thread will run on.",
+    GLOBAL_VAR(bind_attrs[BM_LWN]), CMD_LINE(OPT_ARG),
+    IN_FS_CHARSET,  DEFAULT(nullptr));
+
+static Sys_var_charptr Sys_log_flusher_notifier_bind_cpu(
+    "log_flusher_notifier_bind_cpu",
+    "The set of cpus which log flusher notifier thread will run on.",
+    GLOBAL_VAR(bind_attrs[BM_LFN]), CMD_LINE(OPT_ARG),
+    IN_FS_CHARSET, DEFAULT(nullptr));
+
+static Sys_var_charptr Sys_log_closer_bind_cpu(
+    "log_closer_bind_cpu",
+    "The set of cpus which log closer thread will run on.",
+    GLOBAL_VAR(bind_attrs[BM_LC]), CMD_LINE(OPT_ARG),
+    IN_FS_CHARSET, DEFAULT(nullptr));
+
+static Sys_var_charptr Sys_log_checkpointer_bind_cpu(
+    "log_checkpointer_bind_cpu",
+    "The set of cpus which log checkpointer thread will run on.",
+    GLOBAL_VAR(bind_attrs[BM_LCP]), CMD_LINE(OPT_ARG),
+    IN_FS_CHARSET, DEFAULT(nullptr));
+
+static Sys_var_charptr Sys_log_purger_bind_cpu(
+    "log_purger_bind_cpu",
+    "The set of cpus which log purger thread will run on.",
+    GLOBAL_VAR(bind_attrs[BM_LP]), CMD_LINE(OPT_ARG),
+    IN_FS_CHARSET,  DEFAULT(nullptr));
+#endif
 
 /****************************************************************************
 ** Code to end mysqld
@@ -6683,6 +6740,11 @@ int mysqld_main(int argc, char **argv)
   set_ports();
 
   if (init_server_components()) unireg_abort(MYSQLD_ABORT_EXIT);
+
+#ifdef HAVE_LIBNUMA
+  connBindManager.Init(bind_attrs);
+#endif
+
 
   if (!server_id_supplied)
     LogErr(INFORMATION_LEVEL, ER_WARN_NO_SERVERID_SPECIFIED);
