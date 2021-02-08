@@ -4,9 +4,10 @@
 #ifdef HAVE_LIBNUMA
 #include <numa.h>
 
-#include <mutex>
 #include <string>
 #include <vector>
+
+#include "mysql/psi/mysql_mutex.h"
 
 class THD;
 
@@ -69,7 +70,7 @@ class Sched_affinity_manager {
  private:
   std::vector<Sched_affinity_group> m_sched_affinity_group;
   Sched_affinity_info m_sched_affinity_info;
-  std::mutex m_mutex;
+  mysql_mutex_t m_mutex;
 };
 } // namespace sched_affinity
 #endif /* HAVE_LIBNUMA */

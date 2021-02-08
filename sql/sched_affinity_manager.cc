@@ -5,10 +5,27 @@
 
 #include "mysql/components/services/log_builtins.h"
 #include "sql/sql_class.h"
+#include "sql/mysqld.h"
 
 namespace sched_affinity {
 
+class Lock_guard {
+ public:
+  explicit Lock_guard(mysql_mutex_t &mutex) {
+    m_mutex = &mutex;
+    mysql_mutex_lock(m_mutex);
+  }
+  Lock_guard(const Lock_guard &) = delete;
+  Lock_guard &operator=(const Lock_guard &) = delete;
+  ~Lock_guard() { mysql_mutex_unlock(m_mutex); }
+
+ private:
+  mysql_mutex_t *m_mutex;
+};
+
 Sched_affinity_manager::Sched_affinity_manager() {
+  mysql_mutex_init(key_sched_affinity_mutex, &m_mutex, nullptr);
+
   m_sched_affinity_info.total_cpu_num = 0;
   m_sched_affinity_info.total_node_num = 0;
   m_sched_affinity_info.cpu_num_per_node = 0;
@@ -20,6 +37,8 @@ Sched_affinity_manager::Sched_affinity_manager() {
 }
 
 Sched_affinity_manager::~Sched_affinity_manager() {
+  mysql_mutex_destroy(&m_mutex);
+
   if (m_sched_affinity_info.proc_avail_cpu_mask != nullptr) {
     numa_free_cpumask(m_sched_affinity_info.proc_avail_cpu_mask);
     m_sched_affinity_info.proc_avail_cpu_mask = nullptr;
@@ -136,7 +155,7 @@ bool Sched_affinity_manager::dynamic_bind(THD *thd) {
     return false;
   }
 
-  const std::lock_guard<std::mutex> lock(m_mutex);
+  const Lock_guard lock(m_mutex);
 
   if (m_sched_affinity_group.empty()) {
     return false;
@@ -167,7 +186,7 @@ bool Sched_affinity_manager::dynamic_unbind(THD *thd) {
   if (!m_sched_affinity_info.enabled[TT_FOREGROUND]) {
     return false;
   }
-  const std::lock_guard<std::mutex> lock(m_mutex);
+  const Lock_guard lock(m_mutex);
   --m_sched_affinity_group[thd->get_sched_affinity_group_index()]
         .assigned_thread_num;
   return true;
@@ -187,7 +206,7 @@ void Sched_affinity_manager::take_snapshot(char *buff, int buff_size) {
   if (buff == nullptr || buff_size <= 0) {
     return;
   }
-  const std::lock_guard<std::mutex> lock(m_mutex);
+  const Lock_guard lock(m_mutex);
   int used_buff_size = 0;
   for (auto sched_affinity_group : m_sched_affinity_group) {
     int used = snprintf(buff + used_buff_size, buff_size - used_buff_size,
