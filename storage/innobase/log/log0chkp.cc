@@ -955,7 +955,10 @@ static bool log_consider_checkpoint(log_t &log) {
 
 void log_checkpointer(log_t *log_ptr) {
 #ifdef HAVE_LIBNUMA
-  sched_affinity::Sched_affinity_manager::get_instance()->static_bind(sched_affinity::TT_LOG_CHECKPOINTER);
+  auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
+  if (sched_affinity_manager!=nullptr){
+    sched_affinity_manager->static_bind(sched_affinity::TT_LOG_CHECKPOINTER);
+  }
 #endif
 
   ut_a(log_ptr != nullptr);

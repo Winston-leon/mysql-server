@@ -1966,7 +1966,10 @@ static void log_writer_write_buffer(log_t &log, lsn_t next_write_lsn) {
 
 void log_writer(log_t *log_ptr) {
 #ifdef HAVE_LIBNUMA
-  sched_affinity::Sched_affinity_manager::get_instance()->static_bind(sched_affinity::TT_LOG_WRITER);
+  auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
+  if (sched_affinity_manager!=nullptr){
+    sched_affinity_manager->static_bind(sched_affinity::TT_LOG_WRITER);
+  }
 #endif
 
   ut_a(log_ptr != nullptr);
@@ -2208,7 +2211,10 @@ static void log_flush_low(log_t &log) {
 
 void log_flusher(log_t *log_ptr) {
 #ifdef HAVE_LIBNUMA
-  sched_affinity::Sched_affinity_manager::get_instance()->static_bind(sched_affinity::TT_LOG_FLUSHER);
+  auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
+  if (sched_affinity_manager!=nullptr){
+    sched_affinity_manager->static_bind(sched_affinity::TT_LOG_FLUSHER);
+  }
 #endif
 
   ut_a(log_ptr != nullptr);
@@ -2340,7 +2346,10 @@ void log_flusher(log_t *log_ptr) {
 
 void log_write_notifier(log_t *log_ptr) {
 #ifdef HAVE_LIBNUMA
-  sched_affinity::Sched_affinity_manager::get_instance()->static_bind(sched_affinity::TT_LOG_WRITE_NOTIFIER);
+  auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
+  if (sched_affinity_manager!=nullptr){
+    sched_affinity_manager->static_bind(sched_affinity::TT_LOG_WRITE_NOTIFIER);
+  }
 #endif
 
   ut_a(log_ptr != nullptr);
@@ -2443,7 +2452,10 @@ void log_write_notifier(log_t *log_ptr) {
 
 void log_flush_notifier(log_t *log_ptr) {
 #ifdef HAVE_LIBNUMA
-  sched_affinity::Sched_affinity_manager::get_instance()->static_bind(sched_affinity::TT_LOG_FLUSH_NOTIFIER);
+  auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
+  if (sched_affinity_manager!=nullptr){
+    sched_affinity_manager->static_bind(sched_affinity::TT_LOG_FLUSH_NOTIFIER);
+  }
 #endif
 
   ut_a(log_ptr != nullptr);
@@ -2546,7 +2558,10 @@ void log_flush_notifier(log_t *log_ptr) {
 
 void log_closer(log_t *log_ptr) {
 #ifdef HAVE_LIBNUMA
-  sched_affinity::Sched_affinity_manager::get_instance()->static_bind(sched_affinity::TT_LOG_CLOSER);
+  auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
+  if (sched_affinity_manager!=nullptr){
+    sched_affinity_manager->static_bind(sched_affinity::TT_LOG_CLOSER);
+  }
 #endif
 
   ut_a(log_ptr != nullptr);
