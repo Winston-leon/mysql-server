@@ -3013,12 +3013,10 @@ static void srv_purge_coordinator_suspend(
 
 /** Purge coordinator thread that schedules the purge tasks. */
 void srv_purge_coordinator_thread() {
-#ifdef HAVE_LIBNUMA
   auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
   if (sched_affinity_manager!=nullptr){
-    sched_affinity_manager->static_bind(sched_affinity::TT_PURGE_COORDINATOR);
+    sched_affinity_manager->static_bind(sched_affinity::Thread_type::PURGE_COORDINATOR);
   }
-#endif
 
   srv_slot_t *slot;
 

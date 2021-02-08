@@ -2801,6 +2801,15 @@ ER_WARN_NO_SERVERID_SPECIFIED
 ER_CANT_PARSE_CPU_STRING
   eng "Cannot parse cpu string '%s'."
 
+ER_LIBNUMA_TEST_FAIL
+  eng "libnuma test fail."
+
+ER_NUMA_AVAILABLE_TEST_FAIL
+  eng "numa_available test fail."
+
+ER_USE_DUMMY_SCHED_AFFINITY_MANAGER
+  eng "use dummy sched_affinity_manager."
+
 ER_SCHED_AFFINITY_THREAD_PROCESS_CONFLICT
   eng "Found sched affinity conflict between threads and process."
 

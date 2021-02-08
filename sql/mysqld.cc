@@ -614,9 +614,7 @@ The documentation is based on the source files such as:
 #include "sql/binlog.h"     // mysql_bin_log
 #include "sql/bootstrap.h"  // bootstrap
 #include "sql/check_stack.h"
-#ifdef HAVE_LIBNUMA
 #include "sql/sched_affinity_manager.h"
-#endif
 #include "sql/conn_handler/connection_acceptor.h"  // Connection_acceptor
 #include "sql/conn_handler/connection_handler_impl.h"  // Per_thread_connection_handler
 #include "sql/conn_handler/connection_handler_manager.h"  // Connection_handler_manager
@@ -1021,7 +1019,7 @@ ulong opt_keyring_migration_port = 0;
 bool migrate_connect_options = false;
 uint host_cache_size;
 ulong log_error_verbosity = 3;  // have a non-zero value during early start-up
-extern char* sched_affinity_args[sched_affinity::TT_MAX];
+extern std::map<sched_affinity::Thread_type, char*> sched_affinity_parameter;
 
 #if defined(_WIN32)
 /*
@@ -6687,12 +6685,10 @@ int mysqld_main(int argc, char **argv)
   /* Determine default TCP port and unix socket name */
   set_ports();
 
-#ifdef HAVE_LIBNUMA
-  if (sched_affinity::Sched_affinity_manager::create_instance(sched_affinity_args) == nullptr) {
+  if (sched_affinity::Sched_affinity_manager::create_instance(sched_affinity_parameter) == nullptr) {
     LogErr(ERROR_LEVEL, ER_CANNOT_CREATE_SCHED_AFFINITY_MANAGER);
     unireg_abort(MYSQLD_ABORT_EXIT);
   }
-#endif
 
   if (init_server_components()) unireg_abort(MYSQLD_ABORT_EXIT);
 
@@ -8217,21 +8213,19 @@ static int show_sched_affinity_status(THD *, SHOW_VAR *var, char *buff) {
   return 0;
 }
 
-static int show_sched_affinity_group_number(THD *, SHOW_VAR *var, char *) {
-  var->type = SHOW_INT;
-  var->value = reinterpret_cast<char *>(
-      const_cast<int *>(&sched_affinity::Sched_affinity_manager::get_instance()
-                             ->get_sched_affinity_info()
-                             .total_node_num));
+static int show_sched_affinity_group_number(THD *, SHOW_VAR *var, char *buff) {
+  var->type = SHOW_SIGNED_INT;
+  var->value = buff;
+  *(reinterpret_cast<int32 *>(buff)) = sched_affinity::Sched_affinity_manager::get_instance()
+                             ->get_total_node_number();                    
   return 0;
 }
 
-static int show_sched_affinity_group_capacity(THD *, SHOW_VAR *var, char *) {
-  var->type = SHOW_INT;
-  var->value = reinterpret_cast<char *>(
-      const_cast<int *>(&sched_affinity::Sched_affinity_manager::get_instance()
-                             ->get_sched_affinity_info()
-                             .cpu_num_per_node));
+static int show_sched_affinity_group_capacity(THD *, SHOW_VAR *var, char *buff) {
+  var->type = SHOW_SIGNED_INT;
+  var->value = buff;
+  *(reinterpret_cast<int32 *>(buff)) = sched_affinity::Sched_affinity_manager::get_instance()
+                             ->get_cpu_number_per_node();
   return 0;
 }
 

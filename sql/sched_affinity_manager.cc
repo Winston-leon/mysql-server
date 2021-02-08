@@ -1,13 +1,21 @@
 #include "sql/sched_affinity_manager.h"
 
+#include "mysql/components/services/log_builtins.h"
+#include "sql/mysqld.h"
+#include "sql/sql_class.h"
+
 #ifdef HAVE_LIBNUMA
 #include <cstdio>
+#endif /* HAVE_LIBNUMA */
 
-#include "mysql/components/services/log_builtins.h"
-#include "sql/sql_class.h"
-#include "sql/mysqld.h"
-
+#ifdef HAVE_LIBNUMA
 namespace sched_affinity {
+
+const Thread_type thread_types[] = {
+    Thread_type::FOREGROUND,         Thread_type::LOG_WRITER,
+    Thread_type::LOG_FLUSHER,        Thread_type::LOG_WRITE_NOTIFIER,
+    Thread_type::LOG_FLUSH_NOTIFIER, Thread_type::LOG_CLOSER,
+    Thread_type::LOG_CHECKPOINTER,   Thread_type::PURGE_COORDINATOR};
 
 class Lock_guard {
  public:
@@ -23,30 +31,31 @@ class Lock_guard {
   mysql_mutex_t *m_mutex;
 };
 
-Sched_affinity_manager::Sched_affinity_manager() {
+Sched_affinity_manager_numa::Sched_affinity_manager_numa()
+    : Sched_affinity_manager() {
   mysql_mutex_init(key_sched_affinity_mutex, &m_mutex, nullptr);
 
-  m_sched_affinity_info.total_cpu_num = 0;
-  m_sched_affinity_info.total_node_num = 0;
-  m_sched_affinity_info.cpu_num_per_node = 0;
-  m_sched_affinity_info.proc_avail_cpu_mask = nullptr;
-  for (int i = TT_FOREGROUND; i < TT_MAX; ++i) {
-    m_sched_affinity_info.enabled[i] = false;
-    m_sched_affinity_info.thread_bitmask[i] = nullptr;
+  m_total_cpu_num = 0;
+  m_total_node_num = 0;
+  m_cpu_num_per_node = 0;
+  m_process_cpu_mask = nullptr;
+  for (const auto &i : thread_types) {
+    m_thread_sched_enabled[i] = false;
+    m_thread_bitmask[i] = nullptr;
   }
 }
 
-Sched_affinity_manager::~Sched_affinity_manager() {
+Sched_affinity_manager_numa::~Sched_affinity_manager_numa() {
   mysql_mutex_destroy(&m_mutex);
 
-  if (m_sched_affinity_info.proc_avail_cpu_mask != nullptr) {
-    numa_free_cpumask(m_sched_affinity_info.proc_avail_cpu_mask);
-    m_sched_affinity_info.proc_avail_cpu_mask = nullptr;
+  if (m_process_cpu_mask != nullptr) {
+    numa_free_cpumask(m_process_cpu_mask);
+    m_process_cpu_mask = nullptr;
   }
-  for (int i = TT_FOREGROUND; i < TT_MAX; ++i) {
-    if (m_sched_affinity_info.thread_bitmask[i] != nullptr) {
-      numa_free_cpumask(m_sched_affinity_info.thread_bitmask[i]);
-      m_sched_affinity_info.thread_bitmask[i] = nullptr;
+  for (const auto &i : thread_types) {
+    if (m_thread_bitmask[i] != nullptr) {
+      numa_free_cpumask(m_thread_bitmask[i]);
+      m_thread_bitmask[i] = nullptr;
     }
   }
   for (auto sched_affinity_group : m_sched_affinity_group) {
@@ -57,46 +66,47 @@ Sched_affinity_manager::~Sched_affinity_manager() {
   }
 }
 
-bool Sched_affinity_manager::init(char *sched_affinity_args[TT_MAX]) {
-  if (!init_sched_affinity_info(sched_affinity_args)) {
+bool Sched_affinity_manager_numa::init(
+    const std::map<Thread_type, char *> &sched_affinity_parameter) {
+  if (!init_sched_affinity_info(sched_affinity_parameter)) {
     return false;
   }
   init_sched_affinity_group();
   return true;
 }
 
-bool Sched_affinity_manager::init_sched_affinity_info(
-    char *sched_affinity_args[TT_MAX]) {
-  m_sched_affinity_info.total_cpu_num = numa_num_configured_cpus();
-  m_sched_affinity_info.total_node_num = numa_num_configured_nodes();
-  m_sched_affinity_info.cpu_num_per_node = m_sched_affinity_info.total_cpu_num /
-                                           m_sched_affinity_info.total_node_num;
+bool Sched_affinity_manager_numa::init_sched_affinity_info(
+    const std::map<Thread_type, char *> &sched_affinity_parameter) {
+  m_total_cpu_num = numa_num_configured_cpus();
+  m_total_node_num = numa_num_configured_nodes();
+  m_cpu_num_per_node = m_total_cpu_num /
+                                           m_total_node_num;
 
-  m_sched_affinity_info.proc_avail_cpu_mask = numa_allocate_cpumask();
-  numa_sched_getaffinity(0, m_sched_affinity_info.proc_avail_cpu_mask);
+  m_process_cpu_mask = numa_allocate_cpumask();
+  numa_sched_getaffinity(0, m_process_cpu_mask);
 
-  for (int i = TT_FOREGROUND; i < TT_MAX; ++i) {
-    if (sched_affinity_args[i] == nullptr) {
+  for (const auto &p : sched_affinity_parameter) {
+    if (p.second == nullptr) {
       continue;
-    } else if (!(m_sched_affinity_info.thread_bitmask[i] =
-                     numa_parse_cpustring(sched_affinity_args[i]))) {
-      LogErr(ERROR_LEVEL, ER_CANT_PARSE_CPU_STRING, sched_affinity_args[i]);
+    } else if (!(m_thread_bitmask[p.first] =
+                     numa_parse_cpustring(p.second))) {
+      LogErr(ERROR_LEVEL, ER_CANT_PARSE_CPU_STRING, p.second);
       return false;
     } else if (!check_thread_process_conflict(
-                   m_sched_affinity_info.thread_bitmask[i],
-                   m_sched_affinity_info.proc_avail_cpu_mask)) {
+                   m_thread_bitmask[p.first],
+                   m_process_cpu_mask)) {
       LogErr(ERROR_LEVEL, ER_SCHED_AFFINITY_THREAD_PROCESS_CONFLICT);
       return false;
     }
-    m_sched_affinity_info.enabled[i] = true;
+    m_thread_sched_enabled[p.first] = true;
   }
 
-  if (m_sched_affinity_info.enabled[TT_FOREGROUND]) {
-    for (int i = TT_FOREGROUND + 1; i < TT_MAX; ++i) {
-      if (m_sched_affinity_info.enabled[i] &&
+  if (m_thread_sched_enabled[Thread_type::FOREGROUND]) {
+    for (const auto &i : thread_types) {
+      if (i != Thread_type::FOREGROUND && m_thread_sched_enabled[i] &&
           !check_foreground_background_conflict(
-              m_sched_affinity_info.thread_bitmask[TT_FOREGROUND],
-              m_sched_affinity_info.thread_bitmask[i])) {
+              m_thread_bitmask[Thread_type::FOREGROUND],
+              m_thread_bitmask[i])) {
         LogErr(WARNING_LEVEL, ER_SCHED_AFFINITY_FOREGROUND_BACKGROUND_CONFLICT);
       }
     }
@@ -105,20 +115,21 @@ bool Sched_affinity_manager::init_sched_affinity_info(
   return true;
 }
 
-void Sched_affinity_manager::init_sched_affinity_group() {
-  if (!m_sched_affinity_info.enabled[TT_FOREGROUND]) {
+void Sched_affinity_manager_numa::init_sched_affinity_group() {
+  if (!m_thread_sched_enabled[Thread_type::FOREGROUND]) {
     return;
   }
-  m_sched_affinity_group.resize(m_sched_affinity_info.total_node_num);
+  m_sched_affinity_group.resize(m_total_node_num);
 
-  for (int i = 0; i < m_sched_affinity_info.total_node_num; ++i) {
+  for (int i = 0; i < m_total_node_num; ++i) {
     m_sched_affinity_group[i].avail_cpu_num = 0;
     m_sched_affinity_group[i].avail_cpu_mask = numa_allocate_cpumask();
 
-    for (int j = m_sched_affinity_info.cpu_num_per_node * i;
-         j < m_sched_affinity_info.cpu_num_per_node * (i + 1); ++j) {
+    for (int j = m_cpu_num_per_node * i;
+         j < m_cpu_num_per_node * (i + 1); ++j) {
       if (numa_bitmask_isbitset(
-              m_sched_affinity_info.thread_bitmask[TT_FOREGROUND], j)) {
+              m_thread_bitmask[Thread_type::FOREGROUND],
+              j)) {
         numa_bitmask_setbit(m_sched_affinity_group[i].avail_cpu_mask, j);
         ++m_sched_affinity_group[i].avail_cpu_num;
       }
@@ -128,9 +139,9 @@ void Sched_affinity_manager::init_sched_affinity_group() {
   }
 }
 
-bool Sched_affinity_manager::check_foreground_background_conflict(
+bool Sched_affinity_manager_numa::check_foreground_background_conflict(
     bitmask *bm_foreground, bitmask *bm_background) {
-  for (auto i = 0; i < m_sched_affinity_info.total_cpu_num; ++i) {
+  for (auto i = 0; i < m_total_cpu_num; ++i) {
     if (numa_bitmask_isbitset(bm_foreground, i) &&
         numa_bitmask_isbitset(bm_background, i)) {
       return false;
@@ -139,9 +150,9 @@ bool Sched_affinity_manager::check_foreground_background_conflict(
   return true;
 }
 
-bool Sched_affinity_manager::check_thread_process_conflict(bitmask *bm_thread,
-                                                           bitmask *bm_proc) {
-  for (auto i = 0; i < m_sched_affinity_info.total_cpu_num; ++i) {
+bool Sched_affinity_manager_numa::check_thread_process_conflict(
+    bitmask *bm_thread, bitmask *bm_proc) {
+  for (auto i = 0; i < m_total_cpu_num; ++i) {
     if (numa_bitmask_isbitset(bm_thread, i) &&
         !numa_bitmask_isbitset(bm_proc, i)) {
       return false;
@@ -150,8 +161,8 @@ bool Sched_affinity_manager::check_thread_process_conflict(bitmask *bm_thread,
   return true;
 }
 
-bool Sched_affinity_manager::dynamic_bind(THD *thd) {
-  if (!m_sched_affinity_info.enabled[TT_FOREGROUND]) {
+bool Sched_affinity_manager_numa::dynamic_bind(THD *thd) {
+  if (!m_thread_sched_enabled[Thread_type::FOREGROUND]) {
     return false;
   }
 
@@ -182,8 +193,8 @@ bool Sched_affinity_manager::dynamic_bind(THD *thd) {
   }
 }
 
-bool Sched_affinity_manager::dynamic_unbind(THD *thd) {
-  if (!m_sched_affinity_info.enabled[TT_FOREGROUND]) {
+bool Sched_affinity_manager_numa::dynamic_unbind(THD *thd) {
+  if (!m_thread_sched_enabled[Thread_type::FOREGROUND]) {
     return false;
   }
   const Lock_guard lock(m_mutex);
@@ -192,17 +203,16 @@ bool Sched_affinity_manager::dynamic_unbind(THD *thd) {
   return true;
 }
 
-bool Sched_affinity_manager::static_bind(
-    const Sched_affinity_thread_type thread_type) {
-  if (!m_sched_affinity_info.enabled[thread_type]) {
+bool Sched_affinity_manager_numa::static_bind(const Thread_type thread_type) {
+  if (!m_thread_sched_enabled[thread_type]) {
     return false;
   }
   auto ret = numa_sched_setaffinity(
-      0, m_sched_affinity_info.thread_bitmask[thread_type]);
+      0, m_thread_bitmask[thread_type]);
   return ret == 0 ? true : false;
 }
 
-void Sched_affinity_manager::take_snapshot(char *buff, int buff_size) {
+void Sched_affinity_manager_numa::take_snapshot(char *buff, int buff_size) {
   if (buff == nullptr || buff_size <= 0) {
     return;
   }
@@ -221,21 +231,42 @@ void Sched_affinity_manager::take_snapshot(char *buff, int buff_size) {
   }
 }
 
-const Sched_affinity_info &Sched_affinity_manager::get_sched_affinity_info()
-    const {
-  return m_sched_affinity_info;
+int Sched_affinity_manager_numa::get_total_node_number() {
+  return m_total_node_num;
+}
+int Sched_affinity_manager_numa::get_cpu_number_per_node() {
+  return m_cpu_num_per_node;
+}
+}  // namespace sched_affinity
+#endif /* HAVE_LIBNUMA */
+
+namespace sched_affinity {
+void Sched_affinity_manager_dummy::take_snapshot(char *buff, int buff_size) {
+  if (buff == nullptr || buff_size <= 0) {
+    return;
+  }
+  buff[0] = '\0';
 }
 
 static Sched_affinity_manager *sched_affinity_manager = nullptr;
 
 Sched_affinity_manager *Sched_affinity_manager::create_instance(
-    char *sched_affinity_args[TT_MAX]) {
-  if (numa_available() == -1) {
-    return nullptr;
-  }
+    const std::map<Thread_type, char *> &sched_affinity_parameter) {
   Sched_affinity_manager::free_instance();
-  sched_affinity_manager = new Sched_affinity_manager();
-  if (!Sched_affinity_manager::get_instance()->init(sched_affinity_args)) {
+#ifdef HAVE_LIBNUMA
+  if (numa_available() == -1) {
+    LogErr(WARNING_LEVEL, ER_NUMA_AVAILABLE_TEST_FAIL);
+    LogErr(INFORMATION_LEVEL, ER_USE_DUMMY_SCHED_AFFINITY_MANAGER);
+    sched_affinity_manager = new Sched_affinity_manager_dummy();
+  } else {
+    sched_affinity_manager = new Sched_affinity_manager_numa();
+  }
+#else
+  LogErr(WARNING_LEVEL, ER_LIBNUMA_TEST_FAIL);
+  LogErr(INFORMATION_LEVEL, ER_USE_DUMMY_SCHED_AFFINITY_MANAGER);
+  sched_affinity_manager = new Sched_affinity_manager_dummy();
+#endif /* HAVE_LIBNUMA */
+  if (!sched_affinity_manager->init(sched_affinity_parameter)) {
     return nullptr;
   }
   return sched_affinity_manager;
@@ -252,4 +283,3 @@ void Sched_affinity_manager::free_instance() {
   }
 }
 }  // namespace sched_affinity
-#endif /* HAVE_LIBNUMA */

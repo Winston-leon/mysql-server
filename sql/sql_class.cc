@@ -448,16 +448,14 @@ THD::THD(bool enable_plugins)
       m_stmt_da(&main_da),
       duplicate_slave_id(false),
       is_a_srv_session_thd(false),
-      m_is_plugin_fake_ddl(false) {
+      m_is_plugin_fake_ddl(false),
+      m_sched_affinty_group_index(-1) {
   main_lex->reset();
   set_psi(nullptr);
   mdl_context.init(this);
   init_sql_alloc(key_memory_thd_main_mem_root, &main_mem_root,
                  global_system_variables.query_alloc_block_size,
                  global_system_variables.query_prealloc_size);
-#ifdef HAVE_LIBNUMA
-  m_sched_affinty_group_index = -1;
-#endif
   stmt_arena = this;
   thread_stack = nullptr;
   m_catalog.str = "std";
@@ -574,7 +572,6 @@ THD::THD(bool enable_plugins)
   set_system_user(false);
 }
 
-#ifdef HAVE_LIBNUMA
 void THD::set_sched_affinity_group_index(int index) {
   m_sched_affinty_group_index = index;
 }
@@ -582,7 +579,6 @@ void THD::set_sched_affinity_group_index(int index) {
 int THD::get_sched_affinity_group_index() {
   return m_sched_affinty_group_index;
 }
-#endif
 
 void THD::set_transaction(Transaction_ctx *transaction_ctx) {
   DBUG_ASSERT(is_attachable_ro_transaction_active());

@@ -765,15 +765,6 @@ extern "C" void my_message_sql(uint error, const char *str, myf MyFlags);
 class THD : public MDL_context_owner,
             public Query_arena,
             public Open_tables_state {
-#ifdef HAVE_LIBNUMA 
- private:
-  int m_sched_affinty_group_index;
-
- public:
-  void set_sched_affinity_group_index(int index);
-  int get_sched_affinity_group_index();
-#endif
-
  private:
   inline bool is_stmt_prepare() const {
     DBUG_ASSERT(0);
@@ -4290,6 +4281,13 @@ class THD : public MDL_context_owner,
  public:
   bool is_system_user();
   void set_system_user(bool system_user_flag);
+
+ public:
+  void set_sched_affinity_group_index(int index);
+  int get_sched_affinity_group_index();
+
+ private:
+  int m_sched_affinty_group_index;
 };
 
 /**

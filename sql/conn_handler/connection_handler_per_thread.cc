@@ -27,7 +27,6 @@
 #include <list>
 #include <new>
 
-#include "sql/sched_affinity_manager.h"
 #include "my_compiler.h"
 #include "my_dbug.h"
 #include "my_inttypes.h"
@@ -61,6 +60,7 @@
 #include "sql/sql_error.h"
 #include "sql/sql_parse.h"             // do_command
 #include "sql/sql_thd_internal_api.h"  // thd_set_thread_stack
+#include "sql/sched_affinity_manager.h"
 #include "thr_mutex.h"
 
 // Initialize static members
@@ -296,12 +296,10 @@ static void *handle_connection(void *arg) {
 
     thd_manager->add_thd(thd);
 
-#ifdef HAVE_LIBNUMA
-  auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
-  if (sched_affinity_manager!=nullptr){
-    sched_affinity_manager->dynamic_bind(thd);
-  }
-#endif
+    auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
+    if (sched_affinity_manager!=nullptr){
+      sched_affinity_manager->dynamic_bind(thd);
+    }
 
     if (thd_prepare_connection(thd))
       handler_manager->inc_aborted_connects();
@@ -313,11 +311,9 @@ static void *handle_connection(void *arg) {
     }
     close_connection(thd, 0, false, false);
 
-#ifdef HAVE_LIBNUMA
-  if (sched_affinity_manager!=nullptr){
-    sched_affinity_manager->dynamic_unbind(thd);
-  }
-#endif
+    if (sched_affinity_manager!=nullptr){
+      sched_affinity_manager->dynamic_unbind(thd);
+    }
 
     thd->get_stmt_da()->reset_diagnostics_area();
     thd->release_resources();
