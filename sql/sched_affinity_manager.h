@@ -34,7 +34,6 @@ class Sched_affinity_manager {
   static Sched_affinity_manager *get_instance();
   static void free_instance();
 
-  virtual bool init(const std::map<Thread_type, char *> &) = 0;
   virtual bool dynamic_bind(THD *) = 0;
   virtual bool dynamic_unbind(THD *) = 0;
   virtual bool static_bind(const Thread_type) = 0;
@@ -43,6 +42,7 @@ class Sched_affinity_manager {
   virtual int get_cpu_number_per_node() = 0;
 
  protected:
+  virtual bool init(const std::map<Thread_type, char *> &) = 0;
   virtual ~Sched_affinity_manager() {}
 };
 
@@ -55,7 +55,6 @@ class Sched_affinity_manager_dummy : public Sched_affinity_manager {
   Sched_affinity_manager_dummy &operator=(
       const Sched_affinity_manager_dummy &&) = delete;
 
-  bool init(const std::map<Thread_type, char *> &) override { return true; }
   bool dynamic_bind(THD *) override { return true; }
   bool dynamic_unbind(THD *) override { return true; }
   bool static_bind(const Thread_type) override { return true; }
@@ -66,7 +65,8 @@ class Sched_affinity_manager_dummy : public Sched_affinity_manager {
  private:
   Sched_affinity_manager_dummy() : Sched_affinity_manager(){};
   ~Sched_affinity_manager_dummy(){};
-  friend Sched_affinity_manager;
+  bool init(const std::map<Thread_type, char *> &) override { return true; }
+  friend class Sched_affinity_manager;
 };
 
 #ifdef HAVE_LIBNUMA
@@ -86,7 +86,6 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
   Sched_affinity_manager_numa &operator=(const Sched_affinity_manager_numa &&) =
       delete;
 
-  bool init(const std::map<Thread_type, char *> &) override;
   bool dynamic_bind(THD *) override;
   bool dynamic_unbind(THD *) override;
   bool static_bind(const Thread_type) override;
@@ -97,19 +96,20 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
  private:
   Sched_affinity_manager_numa();
   ~Sched_affinity_manager_numa();
+  bool init(const std::map<Thread_type, char *> &) override;
   bool init_sched_affinity_info(const std::map<Thread_type, char *> &);
   void init_sched_affinity_group();
-  bool check_foreground_background_conflict(bitmask *bm_foreground,
-                                            bitmask *bm_background);
-  bool check_thread_process_conflict(bitmask *bm_thread, bitmask *bm_proc);
-  friend Sched_affinity_manager;
+  bool check_foreground_background_compatibility(bitmask *bm_foreground,
+                                                 bitmask *bm_background);
+  bool check_thread_process_compatibility(bitmask *bm_thread, bitmask *bm_proc);
+  friend class Sched_affinity_manager;
 
  private:
   std::vector<Sched_affinity_group> m_sched_affinity_group;
   int m_total_cpu_num;
   int m_total_node_num;
   int m_cpu_num_per_node;
-  bitmask *m_process_cpu_mask;
+  bitmask *m_process_bitmask;
   std::map<Thread_type, bitmask *> m_thread_bitmask;
   std::map<Thread_type, bool> m_thread_sched_enabled;
   mysql_mutex_t m_mutex;
