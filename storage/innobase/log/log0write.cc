@@ -1968,7 +1968,7 @@ void log_writer(log_t *log_ptr) {
   auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
   if (sched_affinity_manager!=nullptr){
     if(!sched_affinity_manager->static_bind(sched_affinity::Thread_type::LOG_WRITER)){
-      ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY);
+      ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY, "log_writer");
     }
   }
 
@@ -2213,7 +2213,7 @@ void log_flusher(log_t *log_ptr) {
   auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
   if (sched_affinity_manager!=nullptr){
     if(!sched_affinity_manager->static_bind(sched_affinity::Thread_type::LOG_FLUSHER)){
-      ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY);
+      ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY, "log_flusher");
     }
   }
 
@@ -2348,7 +2348,7 @@ void log_write_notifier(log_t *log_ptr) {
   auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
   if (sched_affinity_manager!=nullptr){
     if(!sched_affinity_manager->static_bind(sched_affinity::Thread_type::LOG_WRITE_NOTIFIER)){
-      ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY);
+      ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY, "log_write_notifier");
     }
   }
 
@@ -2454,7 +2454,7 @@ void log_flush_notifier(log_t *log_ptr) {
   auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
   if (sched_affinity_manager!=nullptr){
     if(!sched_affinity_manager->static_bind(sched_affinity::Thread_type::LOG_FLUSH_NOTIFIER)){
-      ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY);
+      ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY, "log_flush_notifier");
     }
   }
 
@@ -2560,7 +2560,7 @@ void log_closer(log_t *log_ptr) {
   auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
   if (sched_affinity_manager!=nullptr){
     if(!sched_affinity_manager->static_bind(sched_affinity::Thread_type::LOG_CLOSER)){
-      ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY);
+      ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY, "log_closer");
     }
   }
 

@@ -303,7 +303,7 @@ static void *handle_connection(void *arg) {
     if (sched_affinity_manager != nullptr) {
       if (!(bind_succeed = sched_affinity_manager->dynamic_bind(
                 sched_affinty_group_index))) {
-        LogErr(ERROR_LEVEL, ER_CANNOT_SET_THREAD_SCHED_AFFINIFY);
+        LogErr(ERROR_LEVEL, ER_CANNOT_SET_THREAD_SCHED_AFFINIFY, "foreground");
       }
     }
 
@@ -319,7 +319,7 @@ static void *handle_connection(void *arg) {
 
     if (bind_succeed && sched_affinity_manager != nullptr) {
       if (!sched_affinity_manager->dynamic_unbind(sched_affinty_group_index)) {
-        LogErr(ERROR_LEVEL, ER_CANNOT_SET_THREAD_SCHED_AFFINIFY);
+        LogErr(ERROR_LEVEL, ER_CANNOT_UNSET_THREAD_SCHED_AFFINIFY, "foreground");
       }
     }
 

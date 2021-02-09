@@ -3016,7 +3016,7 @@ void srv_purge_coordinator_thread() {
   auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
   if (sched_affinity_manager!=nullptr){
     if(!sched_affinity_manager->static_bind(sched_affinity::Thread_type::PURGE_COORDINATOR)){
-      ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY);
+      ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY, "purge_coordinator");
     }
   }
 

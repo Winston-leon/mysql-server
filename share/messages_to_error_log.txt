@@ -2808,7 +2808,10 @@ ER_NUMA_AVAILABLE_TEST_FAIL
   eng "numa_available test fail."
 
 ER_CANNOT_SET_THREAD_SCHED_AFFINIFY
-  eng "Cannot set thread sched affinity."
+  eng "Cannot set thread %s sched affinity."
+
+ER_CANNOT_UNSET_THREAD_SCHED_AFFINIFY
+  eng "Cannot unset thread %s sched affinity."
 
 ER_USE_DUMMY_SCHED_AFFINITY_MANAGER
   eng "use dummy sched_affinity_manager."
