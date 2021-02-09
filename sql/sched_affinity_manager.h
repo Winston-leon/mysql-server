@@ -12,8 +12,6 @@
 
 #include "mysql/psi/mysql_mutex.h"
 
-class THD;
-
 namespace sched_affinity {
 
 enum class Thread_type {
@@ -34,8 +32,8 @@ class Sched_affinity_manager {
   static Sched_affinity_manager *get_instance();
   static void free_instance();
 
-  virtual bool dynamic_bind(THD *) = 0;
-  virtual bool dynamic_unbind(THD *) = 0;
+  virtual bool dynamic_bind(int &) = 0;
+  virtual bool dynamic_unbind(const int &) = 0;
   virtual bool static_bind(const Thread_type &) = 0;
   virtual void take_snapshot(char *buff, int buff_size) = 0;
   virtual int get_total_node_number() = 0;
@@ -55,8 +53,8 @@ class Sched_affinity_manager_dummy : public Sched_affinity_manager {
   Sched_affinity_manager_dummy &operator=(
       const Sched_affinity_manager_dummy &&) = delete;
 
-  bool dynamic_bind(THD *) override { return true; }
-  bool dynamic_unbind(THD *) override { return true; }
+  bool dynamic_bind(int &) override { return true; }
+  bool dynamic_unbind(const int &) override { return true; }
   bool static_bind(const Thread_type &) override { return true; }
   void take_snapshot(char *buff, int buff_size) override;
   int get_total_node_number() override { return -1; }
@@ -86,8 +84,8 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
   Sched_affinity_manager_numa &operator=(const Sched_affinity_manager_numa &&) =
       delete;
 
-  bool dynamic_bind(THD *) override;
-  bool dynamic_unbind(THD *) override;
+  bool dynamic_bind(int &) override;
+  bool dynamic_unbind(const int &) override;
   bool static_bind(const Thread_type &) override;
   void take_snapshot(char *buff, int buff_size) override;
   int get_total_node_number() override;
@@ -98,7 +96,7 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
   ~Sched_affinity_manager_numa();
   bool init(const std::map<Thread_type, char *> &) override;
   bool init_sched_affinity_info(const std::map<Thread_type, char *> &);
-  void init_sched_affinity_group();
+  bool init_sched_affinity_group();
   bool check_foreground_background_compatibility(bitmask *bm_foreground,
                                                  bitmask *bm_background);
   bool check_thread_process_compatibility(bitmask *bm_thread, bitmask *bm_proc);

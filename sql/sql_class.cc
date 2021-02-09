@@ -448,8 +448,7 @@ THD::THD(bool enable_plugins)
       m_stmt_da(&main_da),
       duplicate_slave_id(false),
       is_a_srv_session_thd(false),
-      m_is_plugin_fake_ddl(false),
-      m_sched_affinty_group_index(-1) {
+      m_is_plugin_fake_ddl(false) {
   main_lex->reset();
   set_psi(nullptr);
   mdl_context.init(this);
@@ -570,14 +569,6 @@ THD::THD(bool enable_plugins)
   debug_binlog_xid_last.reset();
 #endif
   set_system_user(false);
-}
-
-void THD::set_sched_affinity_group_index(int index) {
-  m_sched_affinty_group_index = index;
-}
-
-int THD::get_sched_affinity_group_index() {
-  return m_sched_affinty_group_index;
 }
 
 void THD::set_transaction(Transaction_ctx *transaction_ctx) {

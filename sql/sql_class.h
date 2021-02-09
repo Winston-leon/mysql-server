@@ -4281,13 +4281,6 @@ class THD : public MDL_context_owner,
  public:
   bool is_system_user();
   void set_system_user(bool system_user_flag);
-
- public:
-  void set_sched_affinity_group_index(int index);
-  int get_sched_affinity_group_index();
-
- private:
-  int m_sched_affinty_group_index;
 };
 
 /**

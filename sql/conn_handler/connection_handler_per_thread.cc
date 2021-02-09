@@ -296,9 +296,15 @@ static void *handle_connection(void *arg) {
 
     thd_manager->add_thd(thd);
 
-    auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
-    if (sched_affinity_manager!=nullptr){
-      sched_affinity_manager->dynamic_bind(thd);
+    auto sched_affinity_manager =
+        sched_affinity::Sched_affinity_manager::get_instance();
+    int sched_affinty_group_index = -1;
+    bool bind_succeed = false;
+    if (sched_affinity_manager != nullptr) {
+      if (!(bind_succeed = sched_affinity_manager->dynamic_bind(
+                sched_affinty_group_index))) {
+        LogErr(ERROR_LEVEL, ER_CANNOT_SET_THREAD_SCHED_AFFINIFY);
+      }
     }
 
     if (thd_prepare_connection(thd))
@@ -311,8 +317,10 @@ static void *handle_connection(void *arg) {
     }
     close_connection(thd, 0, false, false);
 
-    if (sched_affinity_manager!=nullptr){
-      sched_affinity_manager->dynamic_unbind(thd);
+    if (bind_succeed && sched_affinity_manager != nullptr) {
+      if (!sched_affinity_manager->dynamic_unbind(sched_affinty_group_index)) {
+        LogErr(ERROR_LEVEL, ER_CANNOT_SET_THREAD_SCHED_AFFINIFY);
+      }
     }
 
     thd->get_stmt_da()->reset_diagnostics_area();

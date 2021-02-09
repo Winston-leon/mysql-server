@@ -1967,7 +1967,9 @@ static void log_writer_write_buffer(log_t &log, lsn_t next_write_lsn) {
 void log_writer(log_t *log_ptr) {
   auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
   if (sched_affinity_manager!=nullptr){
-    sched_affinity_manager->static_bind(sched_affinity::Thread_type::LOG_WRITER);
+    if(!sched_affinity_manager->static_bind(sched_affinity::Thread_type::LOG_WRITER)){
+      ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY);
+    }
   }
 
   ut_a(log_ptr != nullptr);
@@ -2210,7 +2212,9 @@ static void log_flush_low(log_t &log) {
 void log_flusher(log_t *log_ptr) {
   auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
   if (sched_affinity_manager!=nullptr){
-    sched_affinity_manager->static_bind(sched_affinity::Thread_type::LOG_FLUSHER);
+    if(!sched_affinity_manager->static_bind(sched_affinity::Thread_type::LOG_FLUSHER)){
+      ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY);
+    }
   }
 
   ut_a(log_ptr != nullptr);
@@ -2343,7 +2347,9 @@ void log_flusher(log_t *log_ptr) {
 void log_write_notifier(log_t *log_ptr) {
   auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
   if (sched_affinity_manager!=nullptr){
-    sched_affinity_manager->static_bind(sched_affinity::Thread_type::LOG_WRITE_NOTIFIER);
+    if(!sched_affinity_manager->static_bind(sched_affinity::Thread_type::LOG_WRITE_NOTIFIER)){
+      ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY);
+    }
   }
 
   ut_a(log_ptr != nullptr);
@@ -2447,7 +2453,9 @@ void log_write_notifier(log_t *log_ptr) {
 void log_flush_notifier(log_t *log_ptr) {
   auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
   if (sched_affinity_manager!=nullptr){
-    sched_affinity_manager->static_bind(sched_affinity::Thread_type::LOG_FLUSH_NOTIFIER);
+    if(!sched_affinity_manager->static_bind(sched_affinity::Thread_type::LOG_FLUSH_NOTIFIER)){
+      ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY);
+    }
   }
 
   ut_a(log_ptr != nullptr);
@@ -2551,7 +2559,9 @@ void log_flush_notifier(log_t *log_ptr) {
 void log_closer(log_t *log_ptr) {
   auto sched_affinity_manager = sched_affinity::Sched_affinity_manager::get_instance();
   if (sched_affinity_manager!=nullptr){
-    sched_affinity_manager->static_bind(sched_affinity::Thread_type::LOG_CLOSER);
+    if(!sched_affinity_manager->static_bind(sched_affinity::Thread_type::LOG_CLOSER)){
+      ib::error(ER_CANNOT_SET_THREAD_SCHED_AFFINIFY);
+    }
   }
 
   ut_a(log_ptr != nullptr);
