@@ -36,7 +36,7 @@ class Sched_affinity_manager {
 
   virtual bool dynamic_bind(THD *) = 0;
   virtual bool dynamic_unbind(THD *) = 0;
-  virtual bool static_bind(const Thread_type) = 0;
+  virtual bool static_bind(const Thread_type &) = 0;
   virtual void take_snapshot(char *buff, int buff_size) = 0;
   virtual int get_total_node_number() = 0;
   virtual int get_cpu_number_per_node() = 0;
@@ -57,7 +57,7 @@ class Sched_affinity_manager_dummy : public Sched_affinity_manager {
 
   bool dynamic_bind(THD *) override { return true; }
   bool dynamic_unbind(THD *) override { return true; }
-  bool static_bind(const Thread_type) override { return true; }
+  bool static_bind(const Thread_type &) override { return true; }
   void take_snapshot(char *buff, int buff_size) override;
   int get_total_node_number() override { return -1; }
   int get_cpu_number_per_node() override { return -1; }
@@ -88,7 +88,7 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
 
   bool dynamic_bind(THD *) override;
   bool dynamic_unbind(THD *) override;
-  bool static_bind(const Thread_type) override;
+  bool static_bind(const Thread_type &) override;
   void take_snapshot(char *buff, int buff_size) override;
   int get_total_node_number() override;
   int get_cpu_number_per_node() override;

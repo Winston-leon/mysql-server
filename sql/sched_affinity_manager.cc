@@ -91,7 +91,7 @@ bool Sched_affinity_manager_numa::init_sched_affinity_info(
       LogErr(ERROR_LEVEL, ER_CANT_PARSE_CPU_STRING, p.second);
       return false;
     } else if (!check_thread_process_compatibility(m_thread_bitmask[p.first],
-                                              m_process_bitmask)) {
+                                                   m_process_bitmask)) {
       LogErr(ERROR_LEVEL, ER_SCHED_AFFINITY_THREAD_PROCESS_CONFLICT);
       return false;
     }
@@ -162,6 +162,9 @@ bool Sched_affinity_manager_numa::check_thread_process_compatibility(
 }
 
 bool Sched_affinity_manager_numa::dynamic_bind(THD *thd) {
+  if (thd == nullptr) {
+    return false;
+  }
   if (!m_thread_sched_enabled[Thread_type::FOREGROUND]) {
     return false;
   }
@@ -194,6 +197,9 @@ bool Sched_affinity_manager_numa::dynamic_bind(THD *thd) {
 }
 
 bool Sched_affinity_manager_numa::dynamic_unbind(THD *thd) {
+  if (thd == nullptr) {
+    return false;
+  }
   if (!m_thread_sched_enabled[Thread_type::FOREGROUND]) {
     return false;
   }
@@ -203,7 +209,10 @@ bool Sched_affinity_manager_numa::dynamic_unbind(THD *thd) {
   return true;
 }
 
-bool Sched_affinity_manager_numa::static_bind(const Thread_type thread_type) {
+bool Sched_affinity_manager_numa::static_bind(const Thread_type &thread_type) {
+  if (thread_type == Thread_type::FOREGROUND) {
+    return false;
+  }
   if (!m_thread_sched_enabled[thread_type]) {
     return false;
   }
