@@ -6,14 +6,14 @@ if (!$target_sched_affinity_group_capacity) {
   --skip should specify target_sched_affinity_group_capacity
 }
 
---let $sched_affinity_group_number = `select variable_value from performance_schema.global_status where variable_name='Sched_affinity_group_number'`
-if ($sched_affinity_group_number != $target_sched_affinity_group_number) {
-  --skip $sched_affinity_group_number not match target_sched_affinity_group_number $target_sched_affinity_group_number
+--let $sched_affinity_group_number = `SELECT variable_value FROM performance_schema.global_status WHERE variable_name='Sched_affinity_group_number'`
+if ($sched_affinity_group_number < $target_sched_affinity_group_number) {
+  --skip $sched_affinity_group_number less than target_sched_affinity_group_number $target_sched_affinity_group_number
 }
 
---let $sched_affinity_group_capacity = `select variable_value from performance_schema.global_status where variable_name='Sched_affinity_group_capacity'`
-if ($sched_affinity_group_capacity != $target_sched_affinity_group_capacity) {
-  --skip $sched_affinity_group_capacity not match target_sched_affinity_group_capacity $target_sched_affinity_group_capacity
+--let $sched_affinity_group_capacity = `SELECT variable_value FROM performance_schema.global_status WHERE variable_name='Sched_affinity_group_capacity'`
+if ($sched_affinity_group_capacity < $target_sched_affinity_group_capacity) {
+  --skip $sched_affinity_group_capacity less than target_sched_affinity_group_capacity $target_sched_affinity_group_capacity
 }
 
 --echo # default config
@@ -49,7 +49,7 @@ while ($i<$connection_number)
 {
   --connect(conn$i,localhost,root,,)
   --connection default
-  SHOW STATUS LIKE 'Sched_affinity_status';
+  SELECT SUBSTRING_INDEX(variable_value,';',2) from performance_schema.global_status WHERE variable_name='Sched_affinity_status';
   --inc $i
 }
 
@@ -58,6 +58,6 @@ while ($i<$connection_number)
 {
   --disconnect conn$i
   --connection default
-  SHOW STATUS LIKE 'Sched_affinity_status';
+  SELECT SUBSTRING_INDEX(variable_value,';',2) from performance_schema.global_status WHERE variable_name='Sched_affinity_status';
   --inc $i
 }
