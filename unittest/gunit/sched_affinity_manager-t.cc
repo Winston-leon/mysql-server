@@ -4,6 +4,7 @@
 #endif
 #include <string>
 #include <iostream>
+#include <thread>
 #include "gtest/gtest.h"
 #include "my_config.h"
 
@@ -14,6 +15,12 @@ using ::sched_affinity::Sched_affinity_manager_numa;
 using ::sched_affinity::Thread_type;
 using ::testing::TestInfo;
 using namespace std;
+
+const Thread_type thread_types[] = {
+    Thread_type::FOREGROUND,         Thread_type::LOG_WRITER,
+    Thread_type::LOG_FLUSHER,        Thread_type::LOG_WRITE_NOTIFIER,
+    Thread_type::LOG_FLUSH_NOTIFIER, Thread_type::LOG_CLOSER,
+    Thread_type::LOG_CHECKPOINTER,   Thread_type::PURGE_COORDINATOR};
 
 class SchedAffinityManagerTest : public ::testing::Test {
  protected:
@@ -67,32 +74,6 @@ class SchedAffinityManagerTest : public ::testing::Test {
     return res;
   }
 
-  // bool numa_sched_conflict_precheck(struct bitmask *test_bitmask, int cpu_num) {
-  //   struct bitmask *process_bitmask = numa_allocate_cpumask();
-  //   int ret = numa_sched_getaffinity(0, process_bitmask);
-
-  //   if (ret == -1) {
-  //     return true;
-  //   } else {
-  //     bool flag = false;
-  //     for (int i = 0; i < cpu_num; i++) {
-  //       if (numa_bitmask_isbitset(test_bitmask, i) 
-  //           && !numa_bitmask_isbitset(process_bitmask, i)) {
-  //         flag = true;
-  //         break;
-  //       }
-  //     }
-  //     if (flag) {
-  //       SUCCEED() << "Skip test case as the subsequent cpu sched affinity conflicts with the process cpu affinity.";
-  //       return true;
-  //     }
-  //   }
-  //   numa_free_cpumask(process_bitmask);
-  //   process_bitmask = nullptr;
-
-  //   return false;
-  // }
-
   bool check_static_bind(int index) {
     struct bitmask *sched_bitmask = numa_allocate_cpumask();
     int ret = numa_sched_getaffinity(0, sched_bitmask);
@@ -131,15 +112,28 @@ class SchedAffinityManagerTest : public ::testing::Test {
     return res;
   }
 
-  // void init_avail_nodes(char nodes_arr[], int node_num) {
-  //   struct bitmask *bm = numa_get_run_node_mask();
+  void init_avail_cpu_num_per_node(std::vector<int> &avail_cpu_num_per_node, int cpu_num_per_node, 
+                                   struct bitmask *default_bitmask) {
+    for (int i = 0; i < test_process_node_num; i++) {
+      int count = 0;
+      for (int j = i * cpu_num_per_node; j < (i + 1) * cpu_num_per_node; j++) {
+        if (numa_bitmask_isbitset(default_bitmask, j)) {
+          count++;
+        }
+      }
+      avail_cpu_num_per_node[i] = count;
+    }
+  }
 
-  //   for (int i = 0, arr_index = 0; i < node_num; i++) {
-  //     if (numa_bitmask_isbitset(bm, i)) {
-  //       nodes_arr[arr_index++] = i;
-  //     }
-  //   }
-  // }
+  void init_avail_nodes_arr(std::vector<char> &avail_nodes_arr, int test_process_node_num) {
+    struct bitmask *test_process_node_mask = numa_get_run_node_mask();
+
+    for (int i = 0, arr_index = 0; i < test_process_node_num; i++) {
+      if (numa_bitmask_isbitset(test_process_node_mask, i)) {
+        avail_nodes_arr[arr_index++] = i;
+      }
+    }
+  }
 
  protected:
   void SetUp() {
@@ -148,23 +142,25 @@ class SchedAffinityManagerTest : public ::testing::Test {
     } else {
       test_process_cpu_num = numa_num_configured_cpus();
       test_process_node_num = numa_num_configured_nodes();
+
+      ASSERT_GT(test_process_cpu_num, 0);
+      ASSERT_GT(test_process_cpu_num, 0);
+
+      cpu_num_per_node = test_process_cpu_num / test_process_node_num;
       test_avail_node_num = get_avail_node_num(test_process_node_num);
 
-      nodes_arr.resize(test_avail_node_num);
-
-      struct bitmask *test_process_node_mask = numa_get_run_node_mask();
-
-      for (int i = 0, arr_index = 0; i < test_process_node_num; i++) {
-        if (numa_bitmask_isbitset(test_process_node_mask, i)) {
-          nodes_arr[arr_index++] = i;
-        }
-      }
       
       default_bitmask = numa_allocate_cpumask();
-      numa_sched_getaffinity(0, default_bitmask);
+      int ret = numa_sched_getaffinity(0, default_bitmask);
+      ASSERT_NE(ret, -1);
 
       cpu_range_str = convert_bitmask_to_string(default_bitmask, cpu_range_min, cpu_range_max);
-      // init_avail_nodes(nodes_arr, test_process_node_num);
+
+      avail_nodes_arr.resize(test_avail_node_num);
+      avail_cpu_num_per_node.resize(test_process_node_num);
+
+      init_avail_nodes_arr(avail_nodes_arr, test_process_node_num);
+      init_avail_cpu_num_per_node(avail_cpu_num_per_node, cpu_num_per_node, default_bitmask);
 
       default_config = {
         {sched_affinity::Thread_type::FOREGROUND, nullptr},
@@ -179,8 +175,6 @@ class SchedAffinityManagerTest : public ::testing::Test {
   }
 
   void TearDown() {
-    numa_sched_setaffinity(0, default_bitmask);
-
     numa_free_cpumask(default_bitmask);
     default_bitmask = nullptr;
   }
@@ -190,13 +184,17 @@ class SchedAffinityManagerTest : public ::testing::Test {
 
   int test_process_node_num;
 
+  int cpu_num_per_node;
+
   int test_avail_node_num;
 
   int cpu_range_min;
 
   int cpu_range_max;
 
-  std::vector<char> nodes_arr;
+  std::vector<char> avail_nodes_arr;
+
+  std::vector<int> avail_cpu_num_per_node;
 
   std::string cpu_range_str;
 
@@ -204,7 +202,6 @@ class SchedAffinityManagerTest : public ::testing::Test {
 
   std::map<Thread_type, char *> default_config;
 
- private:
   struct bitmask *default_bitmask;
 };
 
@@ -269,7 +266,8 @@ TEST_F(SchedAffinityManagerTest, ThreadProcessConflictConfig) {
   
   std::string test_str = std::to_string(cpu_range_min);
   struct bitmask *test_process_bitmask = numa_parse_cpustring(test_str.c_str());
-  numa_sched_setaffinity(0, test_process_bitmask);
+  int ret = numa_sched_setaffinity(0, test_process_bitmask);
+  ASSERT_NE(ret, -1);
 
   if (cpu_range_min != cpu_range_max) {
     test_str = std::to_string(cpu_range_max);
@@ -282,6 +280,9 @@ TEST_F(SchedAffinityManagerTest, ThreadProcessConflictConfig) {
   default_config[sched_affinity::Thread_type::FOREGROUND] = const_cast<char *>(test_str.c_str());
   auto instance = Sched_affinity_manager::create_instance(default_config);
   EXPECT_EQ(instance, nullptr);
+
+  numa_sched_setaffinity(0, default_bitmask);
+  ASSERT_NE(ret, -1);
 
   numa_free_cpumask(test_process_bitmask);
   test_process_bitmask = nullptr;
@@ -300,7 +301,6 @@ TEST_F(SchedAffinityManagerTest, ForegroundBackgroundConflictConfig) {
   default_config[sched_affinity::Thread_type::LOG_WRITER] = const_cast<char *>(test_back_str.c_str());
 
   auto instance = Sched_affinity_manager::create_instance(default_config);
-  /* Background conflicting with foreground doesnt stop the instantiation, but pop out a warning */
   EXPECT_NE(instance, nullptr);
 
   Sched_affinity_manager::free_instance();
@@ -317,28 +317,47 @@ TEST_F(SchedAffinityManagerTest, DynamicBind) {
   auto instance = Sched_affinity_manager::create_instance(default_config);
   ASSERT_NE(instance, nullptr);
 
-  int total_node_num = numa_num_configured_nodes();
-  int total_cpu_num = numa_num_configured_cpus();
-  int cpu_num_per_node = total_cpu_num / total_node_num;
-
-  for (int i = 0; i < test_process_cpu_num + 1; i++) {
-    int group_index = -1;
-    EXPECT_EQ(Sched_affinity_manager::get_instance()->dynamic_bind(group_index), true);
-    EXPECT_EQ(group_index, nodes_arr[i % test_avail_node_num]);
-    struct bitmask *bm = numa_allocate_cpumask();
-    int ret = numa_sched_getaffinity(0, bm);
-    ASSERT_NE(ret, -1);
-    for (int j = 0; j < test_process_cpu_num; j++) {
-      if (j >= group_index * cpu_num_per_node 
+  /* Multi thread version, threads executed in sequence. */
+  for (int i = 0; i < test_process_node_num + 1; i++) {
+    std::thread th([i, this] {
+      int group_index = -1;
+      EXPECT_EQ(Sched_affinity_manager::get_instance()->dynamic_bind(group_index), true);
+      EXPECT_EQ(group_index, avail_nodes_arr[i % test_avail_node_num]);
+      struct bitmask *bm = numa_allocate_cpumask();
+      int ret = numa_sched_getaffinity(0, bm);
+      EXPECT_NE(ret, -1);
+      for(int j = 0; j < numa_num_configured_cpus(); j++) {
+       if(j >= group_index * cpu_num_per_node
           && j < (group_index + 1) * cpu_num_per_node) {
-        EXPECT_EQ(numa_bitmask_isbitset(bm, j), 1);
-      } else {
-        EXPECT_EQ(numa_bitmask_isbitset(bm, j), 0);
+          EXPECT_EQ(numa_bitmask_isbitset(bm, j), numa_bitmask_isbitset(default_bitmask, j));
+        } else {
+          EXPECT_EQ(numa_bitmask_isbitset(bm, j), 0);
+        }
       }
-    }
-    numa_free_cpumask(bm);
-    bm = nullptr;
+      numa_free_cpumask(bm);
+      bm = nullptr;
+    });
+    th.join();
   }
+
+  std::string criterion_str;
+  for (int i = 0; i < test_process_node_num; i++) {
+    if (i == avail_nodes_arr[0]) {
+      criterion_str += "2/" + std::to_string(avail_cpu_num_per_node[i]);
+    } else if (avail_cpu_num_per_node[i] != 0) {
+      criterion_str += "1/" + std::to_string(avail_cpu_num_per_node[i]);
+    } else {
+      criterion_str += "0/0";
+    }
+    criterion_str += "; ";
+  }
+
+  std::string buffered_str;
+  char *buff = new char[BUFFER_SIZE_1024];
+  Sched_affinity_manager::get_instance()->take_snapshot(buff, 1024);
+  buffered_str = std::string(buff);
+  
+  EXPECT_EQ(buffered_str, criterion_str);
 
   Sched_affinity_manager::free_instance();
 }
@@ -355,15 +374,24 @@ TEST_F(SchedAffinityManagerTest, DynamicUnbind) {
   ASSERT_NE(instance, nullptr);
 
   int group_index_nobind = -1;
-  EXPECT_EQ(Sched_affinity_manager::get_instance()->dynamic_unbind(group_index_nobind), false);
+  std::thread th1([&group_index_nobind] {
+    EXPECT_EQ(Sched_affinity_manager::get_instance()->dynamic_unbind(group_index_nobind), false);
+  });
+  th1.join();
 
   int group_index_excessive = test_process_node_num;
-  EXPECT_EQ(Sched_affinity_manager::get_instance()->dynamic_unbind(group_index_excessive), false);
+  std::thread th2([&group_index_excessive] {
+    EXPECT_EQ(Sched_affinity_manager::get_instance()->dynamic_unbind(group_index_excessive), false);
+  });
+  th2.join();
 
   int group_index = -1;
-  EXPECT_EQ(Sched_affinity_manager::get_instance()->dynamic_bind(group_index), true);
-  EXPECT_EQ(group_index, nodes_arr[0]);
-  EXPECT_EQ(Sched_affinity_manager::get_instance()->dynamic_unbind(group_index), true);
+  std::thread th3([&group_index, this] {
+    EXPECT_EQ(Sched_affinity_manager::get_instance()->dynamic_bind(group_index), true);
+    EXPECT_EQ(group_index, avail_nodes_arr[0]);
+    EXPECT_EQ(Sched_affinity_manager::get_instance()->dynamic_unbind(group_index), true);
+  });
+  th3.join();
 
   Sched_affinity_manager::free_instance();
 }
@@ -376,43 +404,34 @@ TEST_F(SchedAffinityManagerTest, StaticBind) {
   auto instance = Sched_affinity_manager::create_instance(default_config);
   ASSERT_NE(instance, nullptr);
 
-  EXPECT_EQ(Sched_affinity_manager::get_instance()->static_bind(sched_affinity::Thread_type::FOREGROUND), false);
-  EXPECT_EQ(Sched_affinity_manager::get_instance()->static_bind(sched_affinity::Thread_type::LOG_WRITER), true);
-  EXPECT_EQ(Sched_affinity_manager::get_instance()->static_bind(sched_affinity::Thread_type::LOG_FLUSHER), true);
-  EXPECT_EQ(Sched_affinity_manager::get_instance()->static_bind(sched_affinity::Thread_type::LOG_WRITE_NOTIFIER), true);
-  EXPECT_EQ(Sched_affinity_manager::get_instance()->static_bind(sched_affinity::Thread_type::LOG_FLUSH_NOTIFIER), true);
-  EXPECT_EQ(Sched_affinity_manager::get_instance()->static_bind(sched_affinity::Thread_type::LOG_CLOSER), true);
-  EXPECT_EQ(Sched_affinity_manager::get_instance()->static_bind(sched_affinity::Thread_type::LOG_CHECKPOINTER), true);
-  EXPECT_EQ(Sched_affinity_manager::get_instance()->static_bind(sched_affinity::Thread_type::PURGE_COORDINATOR), true);
+  for (const auto i : thread_types) {
+    std::thread th([i] {
+      if (i == sched_affinity::Thread_type::FOREGROUND) {
+        EXPECT_EQ(Sched_affinity_manager::get_instance()->static_bind(i), false);
+      } else {
+        EXPECT_EQ(Sched_affinity_manager::get_instance()->static_bind(i), true);
+      }});
+    th.join();
+  }
 
   Sched_affinity_manager::free_instance();
 
-  default_config[sched_affinity::Thread_type::LOG_WRITER] = const_cast<char *>(std::to_string(cpu_range_min).c_str());
-  default_config[sched_affinity::Thread_type::LOG_FLUSHER] = const_cast<char *>(std::to_string(cpu_range_max).c_str());
-  default_config[sched_affinity::Thread_type::LOG_WRITE_NOTIFIER] = const_cast<char *>(std::to_string(cpu_range_min).c_str());
-  default_config[sched_affinity::Thread_type::LOG_FLUSH_NOTIFIER] = const_cast<char *>(std::to_string(cpu_range_max).c_str());
-  default_config[sched_affinity::Thread_type::LOG_CLOSER] = const_cast<char *>(std::to_string(cpu_range_min).c_str());
-  default_config[sched_affinity::Thread_type::LOG_CHECKPOINTER] = const_cast<char *>(std::to_string(cpu_range_max).c_str());
-  default_config[sched_affinity::Thread_type::PURGE_COORDINATOR] = const_cast<char *>(std::to_string(cpu_range_min).c_str());
+  for (const auto i : thread_types) {
+    default_config[i] = const_cast<char *>(std::to_string(cpu_range_min).c_str());
+  }
 
   instance = Sched_affinity_manager::create_instance(default_config);
   ASSERT_NE(instance, nullptr);
 
   EXPECT_EQ(Sched_affinity_manager::get_instance()->static_bind(sched_affinity::Thread_type::FOREGROUND), false);
-  EXPECT_EQ(Sched_affinity_manager::get_instance()->static_bind(sched_affinity::Thread_type::LOG_WRITER), true);
-  EXPECT_EQ(check_static_bind(cpu_range_min), true);
-  EXPECT_EQ(Sched_affinity_manager::get_instance()->static_bind(sched_affinity::Thread_type::LOG_FLUSHER), true);
-  EXPECT_EQ(check_static_bind(cpu_range_max), true);
-  EXPECT_EQ(Sched_affinity_manager::get_instance()->static_bind(sched_affinity::Thread_type::LOG_WRITE_NOTIFIER), true);
-  EXPECT_EQ(check_static_bind(cpu_range_min), true);
-  EXPECT_EQ(Sched_affinity_manager::get_instance()->static_bind(sched_affinity::Thread_type::LOG_FLUSH_NOTIFIER), true);
-  EXPECT_EQ(check_static_bind(cpu_range_max), true);
-  EXPECT_EQ(Sched_affinity_manager::get_instance()->static_bind(sched_affinity::Thread_type::LOG_CLOSER), true);
-  EXPECT_EQ(check_static_bind(cpu_range_min), true);
-  EXPECT_EQ(Sched_affinity_manager::get_instance()->static_bind(sched_affinity::Thread_type::LOG_CHECKPOINTER), true);
-  EXPECT_EQ(check_static_bind(cpu_range_max), true);
-  EXPECT_EQ(Sched_affinity_manager::get_instance()->static_bind(sched_affinity::Thread_type::PURGE_COORDINATOR), true);
-  EXPECT_EQ(check_static_bind(cpu_range_min), true);
+  for (const auto i :thread_types) {
+    if (i != sched_affinity::Thread_type::FOREGROUND) {
+      std::thread th([i, this] {
+      EXPECT_EQ(Sched_affinity_manager::get_instance()->static_bind(i), true);
+      EXPECT_EQ(check_static_bind(cpu_range_min), true);});
+    th.join();    
+    }
+  }
 
   Sched_affinity_manager::free_instance();
 }
@@ -434,22 +453,22 @@ TEST_F(SchedAffinityManagerTest, TakeSnapshot) {
   Sched_affinity_manager::get_instance()->take_snapshot(buff, buff_size);
   EXPECT_EQ(buff, nullptr);
 
-  int cpu_num_per_node = test_process_cpu_num / test_process_node_num;
-
   buff = new char[BUFFER_SIZE_1024];
 
   ASSERT_NE(buff, nullptr);
 
   int initial_group_index = -1;
-  Sched_affinity_manager::get_instance()->dynamic_bind(initial_group_index);
+  std::thread th([&initial_group_index] {Sched_affinity_manager::get_instance()->dynamic_bind(initial_group_index);});
+  th.join();
 
   std::string criterion_str;
   std::string buffered_str;
+
   for (int i = 0; i < test_process_node_num; i++) {
-    if (i == nodes_arr[0]) {
-      criterion_str += "1/" + std::to_string(cpu_num_per_node);
+    if (i == avail_nodes_arr[0]) {
+      criterion_str += "1/" + std::to_string(avail_cpu_num_per_node[i]);
     } else {
-      criterion_str += "0/" + std::to_string(cpu_num_per_node);
+      criterion_str += "0/" + std::to_string(avail_cpu_num_per_node[i]);
     }
     criterion_str += "; ";
   }
