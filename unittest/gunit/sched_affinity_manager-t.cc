@@ -310,6 +310,15 @@ TEST_F(SchedAffinityManagerTest, DynamicBind) {
   if (skip_if_numa_unavailable()) {
     return;
   }
+
+  for (int i = 0; i < test_avail_node_num; i++) {
+    for (int j = 0; j < i; j++) {
+      if (avail_cpu_num_per_node[avail_nodes_arr[j]] 
+          != avail_cpu_num_per_node[avail_nodes_arr[i]]) {
+        return;
+      }
+    }
+  }
   
   std::string test_str = cpu_range_str;
   default_config[sched_affinity::Thread_type::FOREGROUND] = const_cast<char *>(test_str.c_str());
@@ -340,12 +349,15 @@ TEST_F(SchedAffinityManagerTest, DynamicBind) {
     th.join();
   }
 
-  std::string criterion_str;
-  for (int i = 0; i < test_process_node_num; i++) {
-    if (i == avail_nodes_arr[0]) {
-      criterion_str += "2/" + std::to_string(avail_cpu_num_per_node[i]);
+  for (int i = 0; i <= test_process_node_num; i++) {
+    if (i < avail_nodes_arr[(test_process_node_num + 1) % test_avail_node_num]
+        && (test_process_node_num + 1) % test_avail_node_num != 0
+        && avail_cpu_num_per_node[i] != 0) {
+      criterion_str += std::to_string(1 + (test_process_node_num + 1) / test_avail_node_num) 
+                       + "/" + std::to_string(avail_cpu_num_per_node[i]);
     } else if (avail_cpu_num_per_node[i] != 0) {
-      criterion_str += "1/" + std::to_string(avail_cpu_num_per_node[i]);
+      criterion_str += std::to_string((test_process_node_num + 1) / test_avail_node_num) 
+                       + "/" + std::to_string(avail_cpu_num_per_node[i]);
     } else {
       criterion_str += "0/0";
     }
