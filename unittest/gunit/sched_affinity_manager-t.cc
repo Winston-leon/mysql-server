@@ -144,7 +144,7 @@ class SchedAffinityManagerTest : public ::testing::Test {
       test_process_node_num = numa_num_configured_nodes();
 
       ASSERT_GT(test_process_cpu_num, 0);
-      ASSERT_GT(test_process_cpu_num, 0);
+      ASSERT_GT(test_process_node_num, 0);
 
       cpu_num_per_node = test_process_cpu_num / test_process_node_num;
       test_avail_node_num = get_avail_node_num(test_process_node_num);
@@ -310,15 +310,6 @@ TEST_F(SchedAffinityManagerTest, DynamicBind) {
   if (skip_if_numa_unavailable()) {
     return;
   }
-
-  for (int i = 0; i < test_avail_node_num; i++) {
-    for (int j = 0; j < i; j++) {
-      if (avail_cpu_num_per_node[avail_nodes_arr[j]] 
-          != avail_cpu_num_per_node[avail_nodes_arr[i]]) {
-        return;
-      }
-    }
-  }
   
   std::string test_str = cpu_range_str;
   default_config[sched_affinity::Thread_type::FOREGROUND] = const_cast<char *>(test_str.c_str());
@@ -326,12 +317,29 @@ TEST_F(SchedAffinityManagerTest, DynamicBind) {
   auto instance = Sched_affinity_manager::create_instance(default_config);
   ASSERT_NE(instance, nullptr);
 
+  int *thread_num_per_node = new int[test_process_node_num];
+  for (int i = 0; i < test_process_node_num; i++) {
+    thread_num_per_node[i] = 0;
+  }
+
   /* Multi thread version, threads executed in sequence. */
   for (int i = 0; i < test_process_node_num + 1; i++) {
     std::thread th([i, this] {
       int group_index = -1;
+      int criterion_index = -1;
       EXPECT_EQ(Sched_affinity_manager::get_instance()->dynamic_bind(group_index), true);
-      EXPECT_EQ(group_index, avail_nodes_arr[i % test_avail_node_num]);
+      for (int j = 0; j < test_process_node_num; j++) {
+        if (avail_cpu_num_per_node[j] == 0) {
+          continue;
+        }
+        if (criterion_index == -1
+            || thread_num_per_node[j] * avail_cpu_num_per_node[criterion_index]
+               < thread_num_per_node[criterion_index] * avail_cpu_num_per_node[j]) {
+            criterion_index = j;
+        }
+      }
+      thread_num_per_node[criterion_index]++;
+      EXPECT_EQ(group_index, criterion_index);
       struct bitmask *bm = numa_allocate_cpumask();
       int ret = numa_sched_getaffinity(0, bm);
       EXPECT_NE(ret, -1);
@@ -349,19 +357,10 @@ TEST_F(SchedAffinityManagerTest, DynamicBind) {
     th.join();
   }
 
-  for (int i = 0; i <= test_process_node_num; i++) {
-    if (i < avail_nodes_arr[(test_process_node_num + 1) % test_avail_node_num]
-        && (test_process_node_num + 1) % test_avail_node_num != 0
-        && avail_cpu_num_per_node[i] != 0) {
-      criterion_str += std::to_string(1 + (test_process_node_num + 1) / test_avail_node_num) 
-                       + "/" + std::to_string(avail_cpu_num_per_node[i]);
-    } else if (avail_cpu_num_per_node[i] != 0) {
-      criterion_str += std::to_string((test_process_node_num + 1) / test_avail_node_num) 
-                       + "/" + std::to_string(avail_cpu_num_per_node[i]);
-    } else {
-      criterion_str += "0/0";
-    }
-    criterion_str += "; ";
+  std::string criterion_str;
+
+  for (int i = 0; i < test_process_node_num; i++) {
+    criterion_str += std::to_string(thread_num_per_node[i]) + "/" + std::to_string(avail_cpu_num_per_node[i]) + "; ";
   }
 
   std::string buffered_str;
