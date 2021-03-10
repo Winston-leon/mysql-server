@@ -324,7 +324,7 @@ TEST_F(SchedAffinityManagerTest, DynamicBind) {
 
   /* Multi thread version, threads executed in sequence. */
   for (int i = 0; i < test_process_node_num + 1; i++) {
-    std::thread th([i, this] {
+    std::thread th([i, &thread_num_per_node, this] {
       int group_index = -1;
       int criterion_index = -1;
       EXPECT_EQ(Sched_affinity_manager::get_instance()->dynamic_bind(group_index), true);
