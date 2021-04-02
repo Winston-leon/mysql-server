@@ -3,8 +3,12 @@
 #include <numa.h>
 #endif
 #include <string>
+#include <set>
+#include <vector>
 #include <iostream>
 #include <thread>
+#include <mutex>
+#include <condition_variable>
 #include "gtest/gtest.h"
 #include "my_config.h"
 
@@ -197,6 +201,10 @@ class SchedAffinityManagerTest : public ::testing::Test {
   std::vector<int> avail_cpu_num_per_node;
 
   std::string cpu_range_str;
+
+  std::mutex mutex;
+
+  std::condition_variable cv;
 
   const int BUFFER_SIZE_1024 = 1024;
 
@@ -445,6 +453,67 @@ TEST_F(SchedAffinityManagerTest, BindToTarget) {
   }
 
   Sched_affinity_manager::free_instance();
+}
+
+TEST_F(SchedAffinityManagerTest, Reschedule) {
+  if (skip_if_numa_unavailable()) {
+    return;
+  }
+
+  std::string test_ctr = cpu_range_str;
+  default_config[sched_affinity::Thread_type::FOREGROUND] = test_ctr.c_str();
+
+  auto instance = Sched_affinity_manager::create_instance(default_config);
+  ASSERT_NE(instance, nullptr);
+
+  std::set<PID_T> thread_ids;
+  for (int i = 0; i < test_process_node_num + 1; ++i) {
+    std::thread th([i, &thread_ids, this] {
+      std::unique_lock<std::mutex> lock(mutex);
+      int group_index = -1;
+      EXPECT_EQ(Sched_affinity_manager::get_instance()->bind_to_group(group_index), true);
+      thread_ids.insert(syscall(SYS_gettid));
+      cv.wait(lock);
+      lock.unlock();
+      cv.notify_one();
+    });
+    th.detach();
+  }
+
+  std::unique_lock<std::mutex> lock(mutex);
+  default_config[sched_affinity::Thread_type::FOREGROUND] = nullptr;
+  EXPECT_EQ(Sched_affinity_manager::get_instance()->
+    reschedule(default_config, sched_affinity::Thread_type::FOREGROUND), true);
+
+  struct bitmask *bm = numa_allocate_cpumask();
+  for (std::set<PID_T>::iterator it = thread_ids.begin(); it != thread_ids.end(); ++it) {
+    EXPECT_EQ(numa_sched_getaffinity(*it, bm), 0);
+    for (int i = 0; i < test_process_cpu_num; ++i) {
+      EXPECT_EQ(numa_bitmask_isbitset(bm, i), numa_bitmask_isbitset(default_bitmask, i));
+    }
+  }
+  thread_ids.clear();
+  lock.unlock();
+  cv.notify_one();
+
+  default_config[sched_affinity::Thread_type::FOREGROUND] = test_ctr.c_str();
+  std::vector<std::set<PID_T>> group_thread_ids;
+  for (int i = 0; i < test_process_node_num + 1; ++i) {
+    std::thread th([i, &thread_ids, this] {
+      int group_index = -1;
+      EXPECT_EQ(Sched_affinity_manager::get_instance()->bind_to_group(group_index), true);
+      thread_ids.insert(syscall(SYS_gettid));
+    });
+    th.join();
+  }
+
+  EXPECT_EQ(Sched_affinity_manager::get_instance()->
+    reschedule(default_config, sched_affinity::Thread_type::FOREGROUND), true);
+
+  for (std::set<PID_T>::iterator it = thread_ids.begin(); it != thread_ids.end(); ++it) {
+    EXPECT_EQ(numa_sched_getaffintiy(*it, bm), 0);
+    for (int i = 0; i < test_process_cpu_num; ++i)
+  }
 }
 
 TEST_F(SchedAffinityManagerTest, TakeSnapshot) {

@@ -6,6 +6,7 @@
 #endif
 
 #include <map>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -13,6 +14,7 @@
 #include "mysql/psi/mysql_mutex.h"
 
 namespace sched_affinity {
+typedef long int PID_T;
 
 enum class Thread_type {
   FOREGROUND,
@@ -32,9 +34,10 @@ class Sched_affinity_manager {
   static Sched_affinity_manager *get_instance();
   static void free_instance();
 
-  virtual bool bind_to_group(int &) = 0;
-  virtual bool unbind_from_group(const int &) = 0;
-  virtual bool bind_to_target(const Thread_type &) = 0;
+  virtual bool bind_to_group(PID_T thread_id) = 0;
+  virtual bool unbind_from_group(PID_T thread_id) = 0;
+  virtual bool bind_to_target(const Thread_type &, PID_T thread_id) = 0;
+  virtual bool reschedule(const std::map<Thread_type, const char *> &, const Thread_type &) = 0;
   virtual void take_snapshot(char *buff, int buff_size) = 0;
   virtual int get_total_node_number() = 0;
   virtual int get_cpu_number_per_node() = 0;
@@ -53,9 +56,10 @@ class Sched_affinity_manager_dummy : public Sched_affinity_manager {
   Sched_affinity_manager_dummy &operator=(
       const Sched_affinity_manager_dummy &&) = delete;
 
-  bool bind_to_group(int &) override { return true; }
-  bool unbind_from_group(const int &) override { return true; }
-  bool bind_to_target(const Thread_type &) override { return true; }
+  bool bind_to_group(PID_T thread_id) override { return true; }
+  bool unbind_from_group(PID_T thread_id) override { return true; }
+  bool bind_to_target(const Thread_type &, PID_T thread_id) override { return true; }
+  bool reschedule(const std::map<Thread_type, const char *> &, const Thread_type &) override {return true};
   void take_snapshot(char *buff, int buff_size) override;
   int get_total_node_number() override { return -1; }
   int get_cpu_number_per_node() override { return -1; }
@@ -84,9 +88,10 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
   Sched_affinity_manager_numa &operator=(const Sched_affinity_manager_numa &&) =
       delete;
 
-  bool bind_to_group(int &) override;
-  bool unbind_from_group(const int &) override;
-  bool bind_to_target(const Thread_type &) override;
+  bool bind_to_group(PID_T thread_id) override;
+  bool unbind_from_group(PID_T thread_id) override;
+  bool bind_to_target(const Thread_type &, PID_T thread_id) override;
+  bool reschedule(const std::map<Thread_type, const char *> &, const Thread_type &) override;
   void take_snapshot(char *buff, int buff_size) override;
   int get_total_node_number() override;
   int get_cpu_number_per_node() override;
@@ -110,6 +115,8 @@ class Sched_affinity_manager_numa : public Sched_affinity_manager {
   bitmask *m_process_bitmask;
   std::map<Thread_type, bitmask *> m_thread_bitmask;
   std::map<Thread_type, bool> m_thread_sched_enabled;
+  std::vector<std::set<PID_T>> m_group_pid;
+  std::vector<std::set<PID_T>> m_threadtype_pid
   mysql_mutex_t m_mutex;
 };
 #endif /* HAVE_LIBNUMA */

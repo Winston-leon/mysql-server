@@ -1,12 +1,14 @@
 #include "sql/sched_affinity_manager.h"
 
+#include <limits.h>
+#include <sys/syscall.h>
+#include <sys/types.h>
 #include "mysql/components/services/log_builtins.h"
 #include "mysqld_error.h"
 #include "sql/mysqld.h"
 
 #ifdef HAVE_LIBNUMA
 namespace sched_affinity {
-
 const Thread_type thread_types[] = {
     Thread_type::FOREGROUND,         Thread_type::LOG_WRITER,
     Thread_type::LOG_FLUSHER,        Thread_type::LOG_WRITE_NOTIFIER,
@@ -78,6 +80,9 @@ bool Sched_affinity_manager_numa::init_sched_affinity_info(
   m_total_cpu_num = numa_num_configured_cpus();
   m_total_node_num = numa_num_configured_nodes();
   m_cpu_num_per_node = m_total_cpu_num / m_total_node_num;
+
+  m_group_pid.resize(m_total_node_num, std::set<PID_T>());
+  m_threadtype_pid.rezise(Thread_type::PURGE_COORDINATOR + 1, std::set<PID_T>());
 
   m_process_bitmask = numa_allocate_cpumask();
   numa_sched_getaffinity(0, m_process_bitmask);
@@ -163,9 +168,9 @@ bool Sched_affinity_manager_numa::check_thread_process_compatibility(
   return true;
 }
 
-bool Sched_affinity_manager_numa::bind_to_group(int &out) {
+bool Sched_affinity_manager_numa::bind_to_group(PID_T thread_id) {
   if (!m_thread_sched_enabled[Thread_type::FOREGROUND]) {
-    out = -1;
+    m_threadtype_pid[Thead_type::FOREGROUND].insert(thread_id);
     return true;
   }
 
@@ -186,46 +191,180 @@ bool Sched_affinity_manager_numa::bind_to_group(int &out) {
   }
 
   if (best_index == -1) {
-    out = -1;
     return false;
   }
   auto ret = numa_sched_setaffinity(
       0, m_sched_affinity_group[best_index].avail_cpu_mask);
   if (ret == 0) {
     ++m_sched_affinity_group[best_index].assigned_thread_num;
-    out = best_index;
+    m_group_pid[best_index].insert(thread_id);
     return true;
   } else {
-    out = -1;
     return false;
   }
 }
 
-bool Sched_affinity_manager_numa::unbind_from_group(const int &index) {
+bool Sched_affinity_manager_numa::unbind_from_group(PID_T thread_id) {
   if (!m_thread_sched_enabled[Thread_type::FOREGROUND]) {
+    m_threadtype_pid[Thread_type::FOREGROUND].erase(thread_id);
     return true;
   }
-  if (index < 0 || index >= static_cast<int>(m_sched_affinity_group.size())) {
+  int index = -1;
+  for (m_threadtype_pid[Thread_type::FOREGROUND].find(thread_id) == m_threadtype_pid[Thread_type::FOREGROUND].end()) {
     return false;
   }
   const Lock_guard lock(m_mutex);
+  for (int i = 0; i < m_total_node_num; ++i) {
+    if (m_group_pid[i].find(thread_id) != m_group_pid[i].end()) {
+      index = i;
+      break;
+    }
+  }
+
   if (m_sched_affinity_group[index].assigned_thread_num > 0) {
     --m_sched_affinity_group[index].assigned_thread_num;
+    m_group_pid[index].erase(thread_id);
     return true;
   } else {
     return false;
   }
 }
 
-bool Sched_affinity_manager_numa::bind_to_target(const Thread_type &thread_type) {
-  if (thread_type == Thread_type::FOREGROUND) {
-    return false;
-  }
+bool Sched_affinity_manager_numa::bind_to_target(const Thread_type &thread_type, PID_T thread_id) {
+  m_threadtype_pid[thread_type].insert(thread_id);
   if (!m_thread_sched_enabled[thread_type]) {
     return true;
   }
   auto ret = numa_sched_setaffinity(0, m_thread_bitmask[thread_type]);
-  return ret == 0 ? true : false;
+  if (ret == 0) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+bool Sched_affinity_manager_numa::reschedule(
+    const std::map<Thread_type, const char *> &sched_affinity_parameter,
+    const Thread_type &thread_type) {
+  const Lock_guard lock(m_mutex);
+  bool flag = false;
+  if (sched_affinity_parameter[thread_type] == nullptr) {
+    m_thread_sched_enabled[thread_type] = false;
+    m_thread_bitmask[thread_type] = nullptr;
+    return true;
+  } else {
+    if (!m_thread_sched_enabled[thread_type]) {
+      flag = true;
+      m_thread_sched_enabled[thread_type] = true;
+    }
+    if (m_thread_bitmask[thread_type] = numa_parse_cpustring(sched_affinity_parameter[thread_type]) == nullptr) {
+      LogErr(ERROR_LEVEL, ER_CANT_PARSE_CPU_STRING, sched_affinity_parameter[thread_type]);
+      return false;
+    } else if (!check_thread_process_compatibility(m_thread_bitmask[thread_type],
+                                                   m_process_bitmask)) {
+      LogErr(ERROR_LEVEL, ER_SCHED_AFFINITY_THREAD_PROCESS_CONFLICT);
+      return false;
+    } else if (thread_type == Thread_type::FOREGROUND) {
+      for (const auto &i : thread_types) {
+        if (i != Thread_type::FOREGROUND && m_thread_sched_enabled[i] &&
+            !check_foreground_background_compatibility(
+                m_thread_bitmask[Thread_type::FOREGROUND], m_thread_bitmask[i])) {
+          LogErr(WARNING_LEVEL, ER_SCHED_AFFINITY_FOREGROUND_BACKGROUND_CONFLICT);
+        }
+      }
+      init_sched_affinity_group();
+    } else {
+      if (m_thread_sched_enabled[Thread_type::FOREGROUND] &&
+                 !check_foreground_background_compatibility(
+                  m_thread_bitmask[Thread_type::FOREGROUND], m_thread_bitmask[thread_type])) {
+        LogErr(WARNING_LEVEL, ER_SCHED_AFFINITY_FOREGROUND_BACKGROUND_CONFLICT);
+      }
+    }
+  }
+  if (thread_type == Thread_type::FOREGROUND) {
+    // Foreground thread reschedule
+    if (!m_thread_sched_enabled[thread_type]) {
+      for (int i = 0; i < m_total_node_num; ++i) {
+        for (std::set<PID_T>::iterator it = m_group_pid[i].begin();
+             it != m_group_pid[i].end(); ++it) {
+          if (numa_sched_setaffinity(*it, m_process_bitmask) != 0) {
+            return false;
+          }
+        }
+        m_group_pid[i].clear();
+      }
+      return true;
+    }
+    if (flag) {
+      for (std::set<PID_T>::iterator it = m_threadtype_pid[thread_type].begin(); 
+           it != m_threadtype_pid[thread_type].end(); ++it) {
+        bind_to_group(*it);
+      }
+      return true;
+    }
+    int total_thread_num = 0;
+    int total_avail_cpu_num = 0;
+    for (int i = 0; i < m_total_node_num; ++i) {
+      total_thread_num += m_group_pid[i].size();
+      total_avail_cpu_num += m_sched_affinity_group[i].avail_cpu_num;
+    }
+    std::vector<int> migrate_thread_num;
+    migrate_thread_num.resize(m_total_node_num);
+    for (int i = 0; i < m_total_node_num; ++i) {
+      if (m_sched_affinity_group[i].avail_cpu_num == 0) {
+        migrate_thread_num[i] = -(m_group_pid[i].size());
+      } else {
+        migrate_thread_num[i] = total_thread_num * m_sched_affinity_group[i].avail_cpu_num 
+                                / total_avail_cpu_num - m_group_pid[i].size();
+      }
+      m_sched_affinity_group[i].assigned_thread_num = total_thread_num * 
+                                                      m_sched_affinity_group[i].avail_cpu_num / 
+                                                      total_avail_cpu_num;
+    }
+    for (int i = 0; i < m_total_node_num; ++i) {
+      if (migrate_thread_num[i] >= 0) {
+        continue;
+      }
+      std::set<PID_T>::iterator it = m_group_pid[i].begin();
+      std::set<PID_T> tmp;
+      for (int j = 0; j < m_total_node_num; ++j) {
+        if (migrate_thread_num[i] >= 0) {
+          break;
+        } else if (migrate_thread_num[j] > 0) {
+          do {
+            if (numa_sched_setaffinity(*it, m_sched_affinity_group[i].avail_cpu_mask) < 0) {
+              return false;
+            }
+            m_group_pid[j].insert(*it);
+            tmp.insert(*it);
+            ++it;
+          } while (--migrate_thread_num[j] > 0 && ++migrate_thread_num[i] < 0)
+        }
+      }
+      for (it = tmp.begin(); it != tmp.end(); ++it) {
+        m_group_pid[i].erase(*it);
+      }
+    }
+  } else {
+    // Background thread reschedule
+    if (!m_thread_sched_enabled[thread_type]) {
+      for (std::set<PID_T>::iterator it = m_threadtype_pid[thread_type].begin(); 
+           it != m_threadtype_pid[thread_type].end(); ++it) {
+        if (numa_sched_setaffinity(*it, m_process_bitmask) != 0) {
+          return false;
+        } 
+      }
+      m_threadtype_pid[thread_type].clear();
+    } else {
+      for (std::set<PID_T>::iterator it = m_threadtype_pid[thread_type].begin(); 
+           it != m_threadtype_pid[thread_type].end(); ++it) {
+        if (numa_sched_setaffinity(*it, m_thread_bitmask[thread_type]) != 0) {
+          return false;
+        } 
+      }
+    }
+  }
+  return true;
 }
 
 void Sched_affinity_manager_numa::take_snapshot(char *buff, int buff_size) {
