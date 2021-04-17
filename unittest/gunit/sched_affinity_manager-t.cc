@@ -334,20 +334,20 @@ TEST_F(SchedAffinityManagerTest, BindToGroup) {
   for (int i = 0; i < test_process_node_num + 1; i++) {
     std::thread th([i, &thread_num_per_node, this] {
       int group_index = -1;
-      int criterion_index = -1;
-      EXPECT_EQ(Sched_affinity_manager::get_instance()->bind_to_group(group_index), true);
+      //int criterion_index = -1;
+      EXPECT_EQ(Sched_affinity_manager::get_instance()->bind_to_group(my_thread_self()), true);
       for (int j = 0; j < test_process_node_num; j++) {
         if (avail_cpu_num_per_node[j] == 0) {
           continue;
         }
-        if (criterion_index == -1
-            || thread_num_per_node[j] * avail_cpu_num_per_node[criterion_index]
-               < thread_num_per_node[criterion_index] * avail_cpu_num_per_node[j]) {
-            criterion_index = j;
+        if (group_index == -1
+            || thread_num_per_node[j] * avail_cpu_num_per_node[group_index]
+               < thread_num_per_node[group_index] * avail_cpu_num_per_node[j]) {
+            group_index = j;
         }
       }
-      thread_num_per_node[criterion_index]++;
-      EXPECT_EQ(group_index, criterion_index);
+      thread_num_per_node[group_index]++;
+      //EXPECT_EQ(group_index, criterion_index);
       struct bitmask *bm = numa_allocate_cpumask();
       int ret = numa_sched_getaffinity(0, bm);
       EXPECT_NE(ret, -1);
@@ -392,23 +392,14 @@ TEST_F(SchedAffinityManagerTest, UnbindFromGroup) {
   auto instance = Sched_affinity_manager::create_instance(default_config);
   ASSERT_NE(instance, nullptr);
 
-  int group_index_nobind = -1;
-  std::thread th1([&group_index_nobind] {
-    EXPECT_EQ(Sched_affinity_manager::get_instance()->unbind_from_group(group_index_nobind), false);
+  std::thread th1([] {
+    EXPECT_EQ(Sched_affinity_manager::get_instance()->unbind_from_group(my_thread_self()), false);
   });
   th1.join();
 
-  int group_index_excessive = test_process_node_num;
-  std::thread th2([&group_index_excessive] {
-    EXPECT_EQ(Sched_affinity_manager::get_instance()->unbind_from_group(group_index_excessive), false);
-  });
-  th2.join();
-
-  int group_index = -1;
-  std::thread th3([&group_index, this] {
-    EXPECT_EQ(Sched_affinity_manager::get_instance()->bind_to_group(group_index), true);
-    EXPECT_EQ(group_index, avail_nodes_arr[0]);
-    EXPECT_EQ(Sched_affinity_manager::get_instance()->unbind_from_group(group_index), true);
+  std::thread th3([] {
+    EXPECT_EQ(Sched_affinity_manager::get_instance()->bind_to_group(my_thread_self()), true);
+    EXPECT_EQ(Sched_affinity_manager::get_instance()->unbind_from_group(my_thread_self()), true);
   });
   th3.join();
 
@@ -425,11 +416,7 @@ TEST_F(SchedAffinityManagerTest, BindToTarget) {
 
   for (const auto i : thread_types) {
     std::thread th([i] {
-      if (i == sched_affinity::Thread_type::FOREGROUND) {
-        EXPECT_EQ(Sched_affinity_manager::get_instance()->bind_to_target(i), false);
-      } else {
-        EXPECT_EQ(Sched_affinity_manager::get_instance()->bind_to_target(i), true);
-      }});
+      EXPECT_EQ(Sched_affinity_manager::get_instance()->bind_to_target(i, my_thread_self()), true);});
     th.join();
   }
 
@@ -442,11 +429,9 @@ TEST_F(SchedAffinityManagerTest, BindToTarget) {
   instance = Sched_affinity_manager::create_instance(default_config);
   ASSERT_NE(instance, nullptr);
 
-  EXPECT_EQ(Sched_affinity_manager::get_instance()->bind_to_target(sched_affinity::Thread_type::FOREGROUND), false);
   for (const auto i :thread_types) {
-    if (i != sched_affinity::Thread_type::FOREGROUND) {
-      std::thread th([i, this] {
-      EXPECT_EQ(Sched_affinity_manager::get_instance()->bind_to_target(i), true);
+    std::thread th([i, this] {
+      EXPECT_EQ(Sched_affinity_manager::get_instance()->bind_to_target(i, my_thread_self()), true);
       EXPECT_EQ(check_bind_to_target(cpu_range_min), true);});
     th.join();    
     }
@@ -459,61 +444,293 @@ TEST_F(SchedAffinityManagerTest, Reschedule) {
   if (skip_if_numa_unavailable()) {
     return;
   }
-
-  std::string test_ctr = cpu_range_str;
-  default_config[sched_affinity::Thread_type::FOREGROUND] = test_ctr.c_str();
+  /*
+   * This part is to test whether the reschedule-function will function as 
+   * expected when the foreground thread parameter from on to off, and the 
+   * background thread parameter is always off.
+   */ 
+  std::string test_str = cpu_range_str;
+  default_config[sched_affinity::Thread_type::FOREGROUND] = test_str.c_str();
 
   auto instance = Sched_affinity_manager::create_instance(default_config);
   ASSERT_NE(instance, nullptr);
 
-  std::set<PID_T> thread_ids;
+  std::set<my_thread_t> thread_ids;
+  int times = 0;
   for (int i = 0; i < test_process_node_num + 1; ++i) {
-    std::thread th([i, &thread_ids, this] {
+    std::thread th([i, &thread_ids, &times, this] {
       std::unique_lock<std::mutex> lock(mutex);
-      int group_index = -1;
-      EXPECT_EQ(Sched_affinity_manager::get_instance()->bind_to_group(group_index), true);
-      thread_ids.insert(syscall(SYS_gettid));
+      EXPECT_EQ(Sched_affinity_manager::get_instance()->bind_to_group(my_thread_self()), true);
+      thread_ids.insert(my_thread_self());
+      times++;
       cv.wait(lock);
+      EXPECT_EQ(Sched_affinity_manager::get_instance()->unbind_from_group(my_thread_self()), true);
+      times++;
       lock.unlock();
       cv.notify_one();
     });
     th.detach();
   }
 
+  while (times != test_process_node_num + 1) {
+    sleep(0);
+  }
   std::unique_lock<std::mutex> lock(mutex);
   default_config[sched_affinity::Thread_type::FOREGROUND] = nullptr;
   EXPECT_EQ(Sched_affinity_manager::get_instance()->
     reschedule(default_config, sched_affinity::Thread_type::FOREGROUND), true);
 
   struct bitmask *bm = numa_allocate_cpumask();
-  for (std::set<PID_T>::iterator it = thread_ids.begin(); it != thread_ids.end(); ++it) {
+  for (std::set<my_thread_t>::iterator it = thread_ids.begin(); it != thread_ids.end(); ++it) {
     EXPECT_EQ(numa_sched_getaffinity(*it, bm), 0);
     for (int i = 0; i < test_process_cpu_num; ++i) {
       EXPECT_EQ(numa_bitmask_isbitset(bm, i), numa_bitmask_isbitset(default_bitmask, i));
     }
   }
   thread_ids.clear();
+  times = 0;
   lock.unlock();
   cv.notify_one();
+  while (times != test_process_node_num + 1) {
+    sleep(0);
+  }
+  lock.lock();
+  Sched_affinity_manager::free_instance();
+  lock.unlock();
 
-  default_config[sched_affinity::Thread_type::FOREGROUND] = test_ctr.c_str();
-  std::vector<std::set<PID_T>> group_thread_ids;
+  /*
+   * This part is to test whether the reschedule-function will function as 
+   * expected when the foreground thread parameter from off to on, and the 
+   * background thread parameter is always off.
+   */
+  default_config[sched_affinity::Thread_type::FOREGROUND] = nullptr;
+  auto instance = Sched_affinity_manager::create_instance(default_config);
+  ASSERT_NE(instance, nullptr);
+  times = 0;
   for (int i = 0; i < test_process_node_num + 1; ++i) {
     std::thread th([i, &thread_ids, this] {
-      int group_index = -1;
-      EXPECT_EQ(Sched_affinity_manager::get_instance()->bind_to_group(group_index), true);
-      thread_ids.insert(syscall(SYS_gettid));
+      std::unique_lock<std::mutex> lock(mutex);
+      EXPECT_EQ(Sched_affinity_manager::get_instance()->bind_to_group(my_thread_self()), true);
+      thread_ids.insert(my_thread_self());
+      times++;
+      cv.wait(lock);
+      EXPECT_EQ(Sched_affinity_manager::get_instance()->unbind_from_group(my_thread_self()), true);
+      times++;
+      lock.unlock();
+      cv.notify_one();
     });
-    th.join();
+    th.detach();
   }
 
+  while (times != test_process_node_num + 1) {
+    sleep(0);
+  }
+  std::unique_lock<std::mutex> lock(mutex);
+  default_config[sched_affinity::Thread_type::FOREGROUND] = std::string(cpu_range_min).c_str();
   EXPECT_EQ(Sched_affinity_manager::get_instance()->
     reschedule(default_config, sched_affinity::Thread_type::FOREGROUND), true);
 
-  for (std::set<PID_T>::iterator it = thread_ids.begin(); it != thread_ids.end(); ++it) {
+  for (std::set<my_thread_t>::iterator it = thread_ids.begin(); it != thread_ids.end(); ++it) {
     EXPECT_EQ(numa_sched_getaffintiy(*it, bm), 0);
-    for (int i = 0; i < test_process_cpu_num; ++i)
+    for (int i = 0; i < test_process_cpu_num; ++i) {
+      if (i == cpu_range_min) {
+        EXPECT_EQ(numa_bitmask_isbitset(bm, i), 1);
+      } else {
+        EXPECT_EQ(numa_bitmask_isbitset(bm, i), 0);
+      }
+    }
   }
+  thread_ids.clear();
+  times = 0;
+  lock.unlock();
+  cv.notify_one();
+  while (times != test_process_node_num + 1) {
+    sleep(0);
+  }
+  lock.lock();
+  Sched_affinity_manager::free_instance();
+  lock.unlock();
+
+  /*
+   * This part is to test whether the reschedule-function will function as 
+   * expected when the foreground thread parameter changed, and the 
+   * background thread parameter is always off.
+   */
+  default_config[sched_affinity::Thread_type::FOREGROUND] = test_str.c_str();
+  auto instance = Sched_affinity_manager::create_instance(default_config);
+  times = 0;
+  for (int i = 0; i < test_process_node_num + 1; ++i) {
+    std::thread th([i, &thread_ids, this] {
+      std::unique_lock<std::mutex> lock(mutex);
+      EXPECT_EQ(Sched_affinity_manager::get_instance()->bind_to_group(my_thread_self()), true);
+      thread_ids.insert(my_thread_self());
+      times++;
+      cv.wait(lock);
+      EXPECT_EQ(Sched_affinity_manager::get_instance()->unbind_from_group(my_thread_self()), true);
+      times++;
+      lock.unlock();
+      cv.notify_one();
+    });
+    th.detach();
+  }
+
+  while (times != test_process_node_num + 1) {
+    sleep(0);
+  }
+  std::unique_lock<std::mutex> lock(mutex);
+  if (cpu_range_max == cpu_range_min) {
+    default_config[sched_affinity::Thread_type::FOREGROUND] = nullptr;
+  } else {
+    default_config[sched_affinity::Thread_type::FOREGROUND] = std::string(cpu_range_min).c_str();
+  }
+  EXPECT_EQ(Sched_affinity_manager::get_instance()->
+    reschedule(default_config, sched_affinity::Thread_type::FOREGROUND), true);
+  for (std::set<my_thread_t>::iterator it = thread_ids.begin(); it != thread_ids.end(); ++it) {
+    EXPECT_EQ(numa_sched_getaffinity(*it, bm), 0);
+    for (int i = 0; i < test_process_cpu_num; ++i) {
+      if (i == cpu_range_min) {
+        EXPECT_EQ(numa_bitmask_isbitset(bm, i), 1);
+      } else {
+        EXPECT_EQ(numa_bitmask_isbitset(bm, i), 0);
+      }
+    }
+  }
+  thread_ids.clear();
+  times = 0;
+  lock.unlock();
+  cv.notify_one();
+  while (times != test_process_node_num + 1) {
+    sleep(0);
+  }
+  lock.lock();
+  Sched_affinity_manager::free_instance();
+  lock.unlock();
+
+  /*
+   * This part is to test whether the reschedule-function will function as 
+   * expected when the background thread parameter from on to off, and the 
+   * foreground thread parameter is always off.
+   */
+  default_config[sched_affinity::Thread_type::FOREGROUND] = nullptr;
+  test_str = std::string(cpu_range_min);
+  default_config[sched_affinity::Thread_type::LOG_WRITER] = test_str.c_str();
+  auto instance = Sched_affinity_manager::create_instance(default_config);
+  times = 0;
+  std::thread th([i, this] {
+    std::unique_lock<std::mutex> lock(mutex);
+    EXPECT_EQ(Sched_affinity_manager::get_instance()->bind_to_target(my_thread_self()), true);
+    thread_ids.insert(my_thread_self());
+    times++;
+    cv.wait(lock);
+    times++;
+    lock.unlock();
+    cv.notify_one();
+  });
+  th.detach();
+
+  while (times != 1) {
+    sleep(0);
+  }
+  std::unique_lock<std::mutex> lock(mutex);
+  default_config[sched_affinity::Thread_type::LOG_WRITER] = nullptr;
+  EXPECT_EQ(Sched_affinity_manager::get_instance()->
+    reschedule(default_config, sched_affinity::Thread_type::LOG_WRITER), true);
+  for (std::set<my_thread_t>::iterator it = thread_ids.begin(); it != thread_ids.end(); ++it) {
+    EXPECT_EQ(numa_sched_getaffinity(*it, bm), 0);
+    for (int i = 0; i < test_process_cpu_num; ++i) {
+      EXPECT_EQ(numa_bitmask_isbitset(bm, i), numa_bitmask_isbitset(default_bitmask, i));
+    }
+  }
+  thread_ids.clear();
+  times = 0;
+  lock.unlock();
+  cv.notify_one();
+  while (times != 1) {
+    sleep(0);
+  }
+  lock.lock();
+  Sched_affinity_manager::free_instance();
+  lock.unlock();
+
+  /*
+   * This part is to test whether the reschedule-function will function as 
+   * expected when the background thread parameter from off to on, and the 
+   * foreground thread parameter is always off.
+   */
+  default_config[sched_affinity::Thread_type::LOG_WRITER] = nullptr;
+  auto instance = Sched_affinity_manager::create_instance(default_config);
+  std::thread th([i, this] {
+    std::unique_lock<std::mutex> lock(mutex);
+    EXPECT_EQ(Sched_affinity_manager::get_instance()->bind_to_target(my_thread_self()), true);
+    thread_ids.insert(my_thread_self());
+    cv.wait(lock);
+    lock.unlock();
+    cv.notify_one();
+  });
+  th.detach();
+
+  std::unique_lock<std::mutex> lock(mutex);
+  test_str = std::string(cpu_range_min);
+  default_config[sched_affinity::Thread_type::LOG_WRITER] = test_str.c_str();
+  EXPECT_EQ(Sched_affinity_manager::get_instance()->
+    reschedule(default_config, sched_affinity::Thread_type::LOG_WRITER), true);
+  for (std::set<my_thread_t>::iterator it = thread_ids.begin(); it != thread_ids.end(); ++it) {
+    EXPECT_EQ(numa_sched_getaffinity(*it, bm), 0);
+    for (int i = 0; i < test_process_cpu_num; ++i) {
+      if (i == cpu_range_min) {
+        EXPECT_EQ(numa_bitmask_isbitset(bm, i), 1);
+      } else {
+        EXPECT_EQ(numa_bitmask_isbitset(bm, i), 0);
+      }
+    }
+  }
+  thread_ids.clear();
+  lock.unlock();
+  cv.notify_one();
+  cv.wait(lock);
+  Sched_affinity_manager::free_instance();
+
+  /*
+   * This part is to test whether the reschedule-function will function as 
+   * expected when the background thread parameter changed, and the 
+   * foreground thread parameter is always off.
+   */
+  test_str = std::string(cpu_range_min);
+  default_config[sched_affinity::Thread_type::LOG_WRITER] = test_str.c_str();
+  auto instance = Sched_affinity_manager::create_instance(default_config);
+  std::thread th([i, this] {
+    std::unique_lock<std::mutex> lock(mutex);
+    EXPECT_EQ(Sched_affinity_manager::get_instance()->bind_to_target(my_thread_self()), true);
+    thread_ids.insert(my_thread_self());
+    cv.wait(lock);
+    lock.unlock();
+    cv.notify_one();
+  });
+  th.detach();
+
+  std::unique_lock<std::mutex> lock(mutex);
+  test_str = std::string(cpu_range_max);
+  default_config[sched_affinity::Thread_type::LOG_WRITER] = test_str.c_str();
+  EXPECT_EQ(Sched_affinity_manager::get_instance()->
+    reschedule(default_config, sched_affinity::Thread_type::LOG_WRITER), true);
+  for (std::set<my_thread_t>::iterator it = thread_ids.begin(); it != thread_ids.end(); ++it) {
+    EXPECT_EQ(numa_sched_getaffinity(*it, bm), 0);
+    for (int i = 0; i < test_process_cpu_num; ++i) {
+      if (i == cpu_range_max) {
+        EXPECT_EQ(numa_bitmask_isbitset(bm, i), 1);
+      } else {
+        EXPECT_EQ(numa_bitmask_isbitset(bm, i), 0);
+      }
+    }
+  }
+  thread_ids.clear();
+  lock.unlock();
+  cv.notify_one();
+  cv.wait(lock);
+  Sched_affinity_manager::free_instance();
+
+  numa_free_cpumask(bm);
+  bm = nullptr;
 }
 
 TEST_F(SchedAffinityManagerTest, TakeSnapshot) {

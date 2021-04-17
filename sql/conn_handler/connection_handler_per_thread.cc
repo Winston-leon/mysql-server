@@ -298,11 +298,10 @@ static void *handle_connection(void *arg) {
 
     auto sched_affinity_manager =
         sched_affinity::Sched_affinity_manager::get_instance();
-    int sched_affinty_group_index = -1;
     bool bind_succeed = false;
     if (sched_affinity_manager != nullptr) {
       if (!(bind_succeed = sched_affinity_manager->bind_to_group(
-                sched_affinty_group_index))) {
+                my_thread_self()))) {
         LogErr(ERROR_LEVEL, ER_CANNOT_SET_THREAD_SCHED_AFFINIFY, "foreground");
       }
     }
@@ -318,7 +317,7 @@ static void *handle_connection(void *arg) {
     close_connection(thd, 0, false, false);
 
     if (bind_succeed && sched_affinity_manager != nullptr) {
-      if (!sched_affinity_manager->unbind_from_group(sched_affinty_group_index)) {
+      if (!sched_affinity_manager->unbind_from_group(my_thread_self())) {
         LogErr(ERROR_LEVEL, ER_CANNOT_UNSET_THREAD_SCHED_AFFINIFY, "foreground");
       }
     }

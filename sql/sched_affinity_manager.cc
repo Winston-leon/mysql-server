@@ -3,6 +3,7 @@
 #include <limits.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
+#include <unistd.h>
 #include "mysql/components/services/log_builtins.h"
 #include "mysqld_error.h"
 #include "sql/mysqld.h"
@@ -81,8 +82,7 @@ bool Sched_affinity_manager_numa::init_sched_affinity_info(
   m_total_node_num = numa_num_configured_nodes();
   m_cpu_num_per_node = m_total_cpu_num / m_total_node_num;
 
-  m_group_pid.resize(m_total_node_num, std::set<PID_T>());
-  m_threadtype_pid.rezise(Thread_type::PURGE_COORDINATOR + 1, std::set<PID_T>());
+  m_group_pid.resize(m_total_node_num, std::set<my_thread_t>());
 
   m_process_bitmask = numa_allocate_cpumask();
   numa_sched_getaffinity(0, m_process_bitmask);
@@ -168,9 +168,9 @@ bool Sched_affinity_manager_numa::check_thread_process_compatibility(
   return true;
 }
 
-bool Sched_affinity_manager_numa::bind_to_group(PID_T thread_id) {
+bool Sched_affinity_manager_numa::bind_to_group(my_thread_t thread_id) {
+  m_threadtype_pid[thread_types[0]].insert(thread_id);
   if (!m_thread_sched_enabled[Thread_type::FOREGROUND]) {
-    m_threadtype_pid[Thead_type::FOREGROUND].insert(thread_id);
     return true;
   }
 
@@ -204,13 +204,12 @@ bool Sched_affinity_manager_numa::bind_to_group(PID_T thread_id) {
   }
 }
 
-bool Sched_affinity_manager_numa::unbind_from_group(PID_T thread_id) {
+bool Sched_affinity_manager_numa::unbind_from_group(my_thread_t thread_id) {
   if (!m_thread_sched_enabled[Thread_type::FOREGROUND]) {
-    m_threadtype_pid[Thread_type::FOREGROUND].erase(thread_id);
     return true;
   }
   int index = -1;
-  for (m_threadtype_pid[Thread_type::FOREGROUND].find(thread_id) == m_threadtype_pid[Thread_type::FOREGROUND].end()) {
+  if (m_threadtype_pid[Thread_type::FOREGROUND].find(thread_id) == m_threadtype_pid[Thread_type::FOREGROUND].end()) {
     return false;
   }
   const Lock_guard lock(m_mutex);
@@ -230,7 +229,7 @@ bool Sched_affinity_manager_numa::unbind_from_group(PID_T thread_id) {
   }
 }
 
-bool Sched_affinity_manager_numa::bind_to_target(const Thread_type &thread_type, PID_T thread_id) {
+bool Sched_affinity_manager_numa::bind_to_target(const Thread_type &thread_type, my_thread_t thread_id) {
   m_threadtype_pid[thread_type].insert(thread_id);
   if (!m_thread_sched_enabled[thread_type]) {
     return true;
@@ -257,7 +256,8 @@ bool Sched_affinity_manager_numa::reschedule(
       flag = true;
       m_thread_sched_enabled[thread_type] = true;
     }
-    if (m_thread_bitmask[thread_type] = numa_parse_cpustring(sched_affinity_parameter[thread_type]) == nullptr) {
+    if (m_thread_bitmask[thread_type] = 
+        numa_parse_cpustring(sched_affinity_parameter[thread_type]) == nullptr) {
       LogErr(ERROR_LEVEL, ER_CANT_PARSE_CPU_STRING, sched_affinity_parameter[thread_type]);
       return false;
     } else if (!check_thread_process_compatibility(m_thread_bitmask[thread_type],
@@ -285,7 +285,7 @@ bool Sched_affinity_manager_numa::reschedule(
     // Foreground thread reschedule
     if (!m_thread_sched_enabled[thread_type]) {
       for (int i = 0; i < m_total_node_num; ++i) {
-        for (std::set<PID_T>::iterator it = m_group_pid[i].begin();
+        for (std::set<my_thread_t>::iterator it = m_group_pid[i].begin();
              it != m_group_pid[i].end(); ++it) {
           if (numa_sched_setaffinity(*it, m_process_bitmask) != 0) {
             return false;
@@ -296,7 +296,7 @@ bool Sched_affinity_manager_numa::reschedule(
       return true;
     }
     if (flag) {
-      for (std::set<PID_T>::iterator it = m_threadtype_pid[thread_type].begin(); 
+      for (std::set<my_thread_t>::iterator it = m_threadtype_pid[thread_type].begin(); 
            it != m_threadtype_pid[thread_type].end(); ++it) {
         bind_to_group(*it);
       }
@@ -325,8 +325,8 @@ bool Sched_affinity_manager_numa::reschedule(
       if (migrate_thread_num[i] >= 0) {
         continue;
       }
-      std::set<PID_T>::iterator it = m_group_pid[i].begin();
-      std::set<PID_T> tmp;
+      std::set<my_thread_t>::iterator it = m_group_pid[i].begin();
+      std::set<my_thread_t> tmp;
       for (int j = 0; j < m_total_node_num; ++j) {
         if (migrate_thread_num[i] >= 0) {
           break;
@@ -338,7 +338,7 @@ bool Sched_affinity_manager_numa::reschedule(
             m_group_pid[j].insert(*it);
             tmp.insert(*it);
             ++it;
-          } while (--migrate_thread_num[j] > 0 && ++migrate_thread_num[i] < 0)
+          } while (--migrate_thread_num[j] > 0 && ++migrate_thread_num[i] < 0);
         }
       }
       for (it = tmp.begin(); it != tmp.end(); ++it) {
@@ -347,20 +347,13 @@ bool Sched_affinity_manager_numa::reschedule(
     }
   } else {
     // Background thread reschedule
-    if (!m_thread_sched_enabled[thread_type]) {
-      for (std::set<PID_T>::iterator it = m_threadtype_pid[thread_type].begin(); 
+    for (std::set<my_thread_t>::iterator it = m_threadtype_pid[thread_type].begin(); 
            it != m_threadtype_pid[thread_type].end(); ++it) {
-        if (numa_sched_setaffinity(*it, m_process_bitmask) != 0) {
-          return false;
-        } 
-      }
-      m_threadtype_pid[thread_type].clear();
-    } else {
-      for (std::set<PID_T>::iterator it = m_threadtype_pid[thread_type].begin(); 
-           it != m_threadtype_pid[thread_type].end(); ++it) {
-        if (numa_sched_setaffinity(*it, m_thread_bitmask[thread_type]) != 0) {
-          return false;
-        } 
+      if (!m_thread_sched_enabled[thread_type] && 
+            numa_sched_setaffinity(*it, m_process_bitmask) != 0) {
+        return false;
+      } else if (numa_sched_setaffinity(*it, m_thread_bitmask[thread_type]) != 0) {
+        return false;
       }
     }
   }
