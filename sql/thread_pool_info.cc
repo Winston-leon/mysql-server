@@ -48,6 +48,9 @@ static int groups_fill_table(THD* thd, TABLE_LIST* tables, Item*)
   for (uint i = 0; i < MAX_THREAD_GROUPS && all_groups[i].pollfd != -1; i++)
   {
     thread_group_t* group = &all_groups[i];
+
+    mysql_mutex_lock(&group->mutex);
+
     /* ID */
     table->field[0]->store(i, true);
     /* CONNECTION_COUNT */
@@ -69,6 +72,8 @@ static int groups_fill_table(THD* thd, TABLE_LIST* tables, Item*)
 
     if (schema_table_store_record(thd, table))
       return 1;
+
+    mysql_mutex_unlock(&group->mutex);
   }
   return 0;
 }

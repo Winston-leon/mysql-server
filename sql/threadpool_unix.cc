@@ -668,18 +668,6 @@ static connection_t * listener(worker_thread_t *current_thread,
   
     cnt = io_poll_wait(thread_group->pollfd, ev, MAX_EVENTS, -1);
     TP_INCREMENT_GROUP_COUNTER(thread_group, polls[LISTENER]);
-    DBUG_EXECUTE_IF("threadpool_io_poll_wait_until_queue_not_empty",
-      {
-        mysql_mutex_lock(&thread_group->mutex);
-        while (thread_group->queue.is_empty())
-        {
-          mysql_mutex_unlock(&thread_group->mutex);
-          my_sleep(1000000);
-          mysql_mutex_lock(&thread_group->mutex);
-        }
-        mysql_mutex_unlock(&thread_group->mutex);
-      }
-    );
     DBUG_EXECUTE_IF("threadpool_io_poll_wait_at_least_2_events",
       {
         while (cnt < 2)
