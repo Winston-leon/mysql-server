@@ -422,6 +422,18 @@ static connection_t *queue_get(thread_group_t *group, operation_origin origin)
   return ret;
 }
 
+static inline void queue_push(thread_group_t *thread_group, connection_t *connection)
+{
+  connection->enqueue_time= pool_timer.current_microtime;
+  thread_group->queue.push_back(connection);
+}
+
+static inline void high_prio_queue_push(thread_group_t *thread_group, connection_t *connection)
+{
+  connection->enqueue_time= pool_timer.current_microtime;
+  thread_group->high_prio_queue.push_back(connection);
+}
+
 class Thd_timeout_checker : public Do_THD_Impl
 {
 private:
@@ -752,12 +764,12 @@ static connection_t * listener(worker_thread_t *current_thread,
       if (connection_is_high_prio(c))
       {
         c->tickets--;
-        thread_group->high_prio_queue.push_back(c);
+        high_prio_queue_push(thread_group, c);
       }
       else
       {
         c->tickets= c->thd->variables.threadpool_high_prio_tickets;
-        thread_group->queue.push_back(c);
+        queue_push(thread_group, c);
       }
     }
     
@@ -1075,9 +1087,8 @@ static void queue_put(thread_group_t *thread_group, connection_t *connection)
   DBUG_ENTER("queue_put");
 
   mysql_mutex_lock(&thread_group->mutex);
-  connection->enqueue_time= pool_timer.current_microtime;
   connection->tickets= connection->thd->variables.threadpool_high_prio_tickets;
-  thread_group->queue.push_back(connection);
+  queue_push(thread_group, connection);
 
   if (thread_group->active_thread_count == 0)
     wake_or_create_thread(thread_group);
@@ -1177,7 +1188,7 @@ static connection_t *get_event(worker_thread_t *current_thread,
 
           connection->tickets=
             connection->thd->variables.threadpool_high_prio_tickets;
-          thread_group->queue.push_back(connection);
+          queue_push(thread_group, connection);
           connection= NULL;
         }
 
